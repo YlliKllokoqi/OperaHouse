@@ -1,0 +1,30 @@
+name: operahouse
+
+services:
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: operahouse-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: operahouse
+      RABBITMQ_DEFAULT_PASS: operahouse
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+        
+  postgres:
+    image: postgres:17
+    container_name: operahouse-postgres
+    environment:
+      POSTGRES_DB: operahouse
+      POSTGRES_USER: operahouse
+      POSTGRES_PASSWORD: operahouse
+    ports:
+      - "55432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    
+volumes:
+  rabbitmq-data:
+  postgres-data:

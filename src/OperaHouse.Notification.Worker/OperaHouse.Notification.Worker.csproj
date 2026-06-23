@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-OperaHouse.Notification.Worker-bd4dd695-0171-4d19-b417-e81d9e1077c2</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OperaHouse.Contracts\OperaHouse.Contracts.csproj" />
+    <ProjectReference Include="..\OperaHouse.Messaging\OperaHouse.Messaging.csproj" />
+  </ItemGroup>
+</Project>
