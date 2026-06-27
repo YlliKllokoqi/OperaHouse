@@ -6,7 +6,8 @@ namespace OperaHouse.Booking.Application.Bookings;
 
 public sealed class BookingService(
     IBookingRepository bookingRepository,
-    IPerformanceRepository performanceRepository)
+    IPerformanceRepository performanceRepository,
+    IBookingEventPublisher bookingEventPublisher)
     : IBookingService
 {
     public async Task<BookingDto?> GetByIdAsync(
@@ -48,6 +49,10 @@ public sealed class BookingService(
         };
 
         await bookingRepository.AddAsync(
+            booking,
+            cancellationToken);
+
+        await bookingEventPublisher.PublishBookingCreatedAsync(
             booking,
             cancellationToken);
 
