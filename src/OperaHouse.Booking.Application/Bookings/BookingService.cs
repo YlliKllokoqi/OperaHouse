@@ -1,13 +1,13 @@
 using OperaHouse.Booking.Application.Performances;
 using OperaHouse.Booking.Domain.Bookings;
+using OperaHouse.Contracts.Events;
 using BookingEntity = OperaHouse.Booking.Domain.Bookings.Booking;
 
 namespace OperaHouse.Booking.Application.Bookings;
 
 public sealed class BookingService(
     IBookingRepository bookingRepository,
-    IPerformanceRepository performanceRepository,
-    IBookingEventPublisher bookingEventPublisher)
+    IPerformanceRepository performanceRepository)
     : IBookingService
 {
     public async Task<BookingDto?> GetByIdAsync(
@@ -48,12 +48,20 @@ public sealed class BookingService(
             CreatedAt = DateTimeOffset.UtcNow
         };
 
+        var messageId = Guid.NewGuid();
+
+        var bookingCreated = new BookingCreated(
+            MessageId: messageId,
+            CorrelationId: Guid.NewGuid(),
+            BookingId: booking.Id,
+            PerformanceId: booking.PerformanceId,
+            CustomerEmail: booking.CustomerEmail,
+            Seats: booking.Seats,
+            OccurredAt: DateTimeOffset.UtcNow);
+        
         await bookingRepository.AddAsync(
             booking,
-            cancellationToken);
-
-        await bookingEventPublisher.PublishBookingCreatedAsync(
-            booking,
+            bookingCreated,
             cancellationToken);
 
         return ToDto(booking);

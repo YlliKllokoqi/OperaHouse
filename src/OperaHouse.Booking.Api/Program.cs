@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using OperaHouse.Booking.Application.Bookings;
 using OperaHouse.Booking.Application.Performances;
 using OperaHouse.Booking.Infrastructure.Bookings;
+using OperaHouse.Booking.Infrastructure.Outbox;
 using OperaHouse.Booking.Infrastructure.Performances;
 using OperaHouse.Booking.Infrastructure.Persistence;
 using OperaHouse.Messaging;
@@ -17,7 +18,7 @@ builder.Services.AddDbContext<BookingDbContext>(options =>
 builder.Services.Configure<RabbitMqOptions>(
     builder.Configuration.GetSection("RabbitMq"));
 builder.Services.AddScoped<RabbitMqPublisher>();
-builder.Services.AddScoped<IBookingEventPublisher, RabbitMqBookingEventPublisher>();
+builder.Services.AddHostedService<OutboxPublisherWorker>();
 builder.Services.AddScoped<IBookingService, BookingService>();
 builder.Services.AddScoped<IBookingRepository, BookingRepository>();
 builder.Services.AddScoped<IPerformanceService, PerformanceService>();

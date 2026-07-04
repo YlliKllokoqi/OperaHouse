@@ -23,9 +23,12 @@ public class RabbitMqPublisher(IOptions<RabbitMqOptions> options,
             UserName = _options.UserName,
             Password = _options.Password
         };
+        var channelOptions = new CreateChannelOptions(
+            publisherConfirmationsEnabled: true,
+            publisherConfirmationTrackingEnabled: true);
 
         await using var connection = await factory.CreateConnectionAsync(cancellationToken);
-        await using var channel = await connection.CreateChannelAsync(cancellationToken: cancellationToken);
+        await using var channel = await connection.CreateChannelAsync(channelOptions, cancellationToken: cancellationToken);
         
         logger.LogInformation(
             "Declaring RabbitMQ exchange {ExchangeName}",
@@ -57,7 +60,7 @@ public class RabbitMqPublisher(IOptions<RabbitMqOptions> options,
         await channel.BasicPublishAsync(
             exchange: _options.ExchangeName,
             routingKey: routingKey,
-            mandatory: false,
+            mandatory: true,
             basicProperties: properties,
             body: body,
             cancellationToken: cancellationToken);
@@ -67,5 +70,74 @@ public class RabbitMqPublisher(IOptions<RabbitMqOptions> options,
             typeof(TMessage).Name,
             _options.ExchangeName,
             routingKey);
+    }
+
+    public async Task PublishJsonAsync(
+        string payload,
+        string routingKey,
+        Guid messageId,
+        string messageType,
+        CancellationToken cancellationToken)
+    {
+        var factory = new ConnectionFactory
+        {
+            HostName = _options.HostName,
+            Port = _options.Port,
+            UserName = _options.UserName,
+            Password = _options.Password
+        };
+
+        var channelOptions = new CreateChannelOptions(
+            publisherConfirmationsEnabled: true,
+            publisherConfirmationTrackingEnabled: true);
+
+        await using var connection = await factory.CreateConnectionAsync(cancellationToken);
+        await using var channel = await connection.CreateChannelAsync(
+            channelOptions,
+            cancellationToken: cancellationToken);
+
+        await channel.ExchangeDeclareAsync(
+            exchange: _options.ExchangeName,
+            type: ExchangeType.Topic,
+            durable: true,
+            autoDelete: false,
+            arguments: null,
+            cancellationToken: cancellationToken);
+
+        var body = Encoding.UTF8.GetBytes(payload);
+
+        var properties = new BasicProperties
+        {
+            Persistent = true,
+            ContentType = "application/json",
+            MessageId = messageId.ToString(),
+            Type = messageType,
+            Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
+            Headers = new Dictionary<string, object?>
+            {
+                ["message-id"] = messageId.ToString(),
+                ["message-type"] = messageType
+            }
+        };
+
+        logger.LogInformation(
+            "Publishing outbox message {MessageId} of type {MessageType} to exchange {ExchangeName} with routing key {RoutingKey}",
+            messageId,
+            messageType,
+            _options.ExchangeName,
+            routingKey);
+
+        await channel.BasicPublishAsync(
+            exchange: _options.ExchangeName,
+            routingKey: routingKey,
+            mandatory: true,
+            basicProperties: properties,
+            body: body,
+            cancellationToken: cancellationToken);
+
+        logger.LogInformation(
+            "Published outbox message {MessageId} of type {MessageType}",
+            messageId,
+            messageType);
     }
 }

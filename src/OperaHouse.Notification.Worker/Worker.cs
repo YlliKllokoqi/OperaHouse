@@ -206,28 +206,16 @@ public class Worker(ILogger<Worker> logger,
 
                 if (retryCount < _options.BookingCreatedMaxRetryAttempts)
                 {
-                    var nextRetryCount = retryCount + 1;
-
-                    logger.LogWarning(
-                        "BookingCreated message failed. Moving message to retry exchange {ExchangeName} with routing key {RoutingKey}. Retry attempt {RetryAttempt}/{MaxRetryAttempts}",
-                        _options.RetryExchangeName,
-                        _options.BookingCreatedRetryRoutingKey,
-                        nextRetryCount,
-                        _options.BookingCreatedMaxRetryAttempts);
-                    
-                    await PublishToRetryQueueAsync(
+                    await PublishToRetryExchangeAsync(
                         channel,
-                        eventArgs.Body,
-                        nextRetryCount,
+                        body: eventArgs.Body,
+                        retryCount: retryCount + 1,
                         stoppingToken);
 
                     await channel.BasicAckAsync(
                         deliveryTag: eventArgs.DeliveryTag,
                         multiple: false,
                         cancellationToken: stoppingToken);
-
-                    logger.LogInformation(
-                        "Original failed message was ACKed after being published to retry queue.");
 
                     return;
                 }
@@ -257,7 +245,7 @@ public class Worker(ILogger<Worker> logger,
         await Task.Delay(Timeout.Infinite, stoppingToken);
     }
 
-    private async Task PublishToRetryQueueAsync(
+    private async Task PublishToRetryExchangeAsync(
         IChannel channel,
         ReadOnlyMemory<byte> body,
         int retryCount,

@@ -11,6 +11,15 @@ OperaHouse is a learning project for understanding RabbitMQ and gradually master
     - Avoid overly complicated patterns.
     - Avoid methods or behavior that are difficult to discover.
     - Prefer explicit code while learning RabbitMQ concepts.
+    - If a simpler code solution can satisfy the requirement clearly and safely, choose it.
+    - Do not add boilerplate, layers, wrappers, or patterns unless they solve a real problem in the current project.
+    - Production-grade does not mean overengineered; prefer the smallest robust solution.
+    - Follow standard, recognizable coding patterns where they fit naturally, such as Repository, Factory, Options, Background Worker, and Adapter.
+    - Do not force a pattern if it makes the feature harder to understand or weakens the final design.
+    - If a standard pattern is not a good fit, explain why and propose a clearer alternative before implementing it.
+    - Do not choose a short-term "good enough for now" route when a scalable, production-grade long-term solution is appropriate.
+    - Prefer designs that can grow with the final project, even if they require a little more structure, as long as the structure has a clear purpose.
+    - If there is tension between simplicity and long-term production quality, explain the tradeoff and recommend the production-grade path.
 
 2. Do not create commits, push changes, or perform other Git operations without explicit approval.
 

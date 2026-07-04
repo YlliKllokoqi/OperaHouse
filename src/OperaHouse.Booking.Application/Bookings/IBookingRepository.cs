@@ -1,3 +1,4 @@
+using OperaHouse.Contracts.Events;
 using BookingEntity = OperaHouse.Booking.Domain.Bookings.Booking;
 
 namespace OperaHouse.Booking.Application.Bookings;
@@ -10,5 +11,6 @@ public interface IBookingRepository
 
     Task AddAsync(
         BookingEntity booking,
+        BookingCreated bookingCreated,
         CancellationToken cancellationToken);
 }

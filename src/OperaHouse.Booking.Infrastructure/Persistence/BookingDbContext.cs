@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using OperaHouse.Booking.Domain.Bookings;
 using OperaHouse.Booking.Domain.Performances;
+using OperaHouse.Booking.Infrastructure.Persistence.Outbox;
 
 namespace OperaHouse.Booking.Infrastructure.Persistence;
 
@@ -9,6 +10,7 @@ public sealed class BookingDbContext(
     : DbContext(options)
 {
     public DbSet<Domain.Bookings.Booking> Bookings => Set<Domain.Bookings.Booking>();
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     public DbSet<Performance> Performances => Set<Performance>();
 
@@ -48,6 +50,42 @@ public sealed class BookingDbContext(
                 .WithMany()
                 .HasForeignKey(x => x.PerformanceId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<OutboxMessage>(outbox =>
+        {
+            outbox.ToTable("OutboxMessages");
+
+            outbox.HasKey(x => x.Id);
+
+            outbox.HasIndex(x => x.MessageId)
+                .IsUnique();
+
+            outbox.HasIndex(x => new
+            {
+                x.ProcessedAt,
+                x.OccurredAt
+            });
+
+            outbox.Property(x => x.Type)
+                .HasMaxLength(300)
+                .IsRequired();
+
+            outbox.Property(x => x.RoutingKey)
+                .HasMaxLength(200)
+                .IsRequired();
+
+            outbox.Property(x => x.Payload)
+                .IsRequired();
+
+            outbox.Property(x => x.OccurredAt)
+                .IsRequired();
+
+            outbox.Property(x => x.PublishAttempts)
+                .IsRequired();
+
+            outbox.Property(x => x.LastError)
+                .HasMaxLength(2000);
         });
     }
 
