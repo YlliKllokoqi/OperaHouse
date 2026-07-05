@@ -1,15 +1,18 @@
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using OperaHouse.Contracts.Events;
 using OperaHouse.Messaging;
+using OperaHouse.Notification.Application.Notifications;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
 namespace OperaHouse.Notification.Worker;
 
 public class Worker(ILogger<Worker> logger,
-    IOptions<RabbitMqOptions> options)
+    IOptions<RabbitMqOptions> options,
+    IServiceScopeFactory serviceScopeFactory)
     : BackgroundService
 {
     private readonly RabbitMqOptions _options = options.Value;
@@ -160,15 +163,22 @@ public class Worker(ILogger<Worker> logger,
             arguments: null,
             cancellationToken: stoppingToken);
 
+        await channel.BasicQosAsync(
+            prefetchSize: 0,
+            prefetchCount: 1,
+            global: false,
+            cancellationToken: stoppingToken);
+
         var consumer = new AsyncEventingBasicConsumer(channel);
 
         consumer.ReceivedAsync += async (_, eventArgs) =>
         {
+            var body = eventArgs.Body.ToArray();
+
             try
             {
-                
                 var json = Encoding.UTF8.GetString(
-                    eventArgs.Body.ToArray());
+                    body);
 
                 var message = JsonSerializer.Deserialize<BookingCreated>(json);
 
@@ -183,18 +193,28 @@ public class Worker(ILogger<Worker> logger,
                     message.MessageId,
                     message.BookingId);
 
-                logger.LogInformation(
-                    "Email sent to {CustomerEmail}: booking received",
-                    message.CustomerEmail);
+                await using var scope = serviceScopeFactory.CreateAsyncScope();
+
+                var notificationProcessor = scope.ServiceProvider
+                    .GetRequiredService<INotificationProcessor>();
+
+                var result = await notificationProcessor.ProcessBookingCreatedAsync(
+                    message,
+                    stoppingToken);
                 
                 logger.LogInformation(
-                    "ACK sent for BookingCreated message {MessageId}",
-                    message.MessageId);
+                    "Notification processing result for message {MessageId}: {Result}",
+                    message.MessageId,
+                    result);
 
                 await channel.BasicAckAsync(
                     deliveryTag: eventArgs.DeliveryTag,
                     multiple: false,
                     cancellationToken: stoppingToken);
+
+                logger.LogInformation(
+                    "ACK sent for BookingCreated message {MessageId}",
+                    message.MessageId);
             }
             catch (Exception e)
             {
@@ -208,7 +228,7 @@ public class Worker(ILogger<Worker> logger,
                 {
                     await PublishToRetryExchangeAsync(
                         channel,
-                        body: eventArgs.Body,
+                        body: body,
                         retryCount: retryCount + 1,
                         stoppingToken);
 
