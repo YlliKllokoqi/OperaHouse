@@ -30,6 +30,7 @@ public sealed class BookingRepository(BookingDbContext dbContext) : IBookingRepo
         {
             Id = Guid.NewGuid(),
             MessageId = bookingCreated.MessageId,
+            CorrelationId = bookingCreated.CorrelationId,
             Type = nameof(BookingCreated),
             RoutingKey = "booking.created",
             Payload = JsonSerializer.Serialize(bookingCreated),

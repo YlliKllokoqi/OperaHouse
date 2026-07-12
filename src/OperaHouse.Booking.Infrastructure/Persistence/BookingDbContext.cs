@@ -61,6 +61,9 @@ public sealed class BookingDbContext(
             outbox.HasIndex(x => x.MessageId)
                 .IsUnique();
 
+            outbox.Property(x => x.CorrelationId)
+                .IsRequired();
+
             outbox.HasIndex(x => new
             {
                 x.ProcessedAt,

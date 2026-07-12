@@ -76,6 +76,7 @@ public class RabbitMqPublisher(IOptions<RabbitMqOptions> options,
         string payload,
         string routingKey,
         Guid messageId,
+        Guid correlationId,
         string messageType,
         CancellationToken cancellationToken)
     {
@@ -111,11 +112,13 @@ public class RabbitMqPublisher(IOptions<RabbitMqOptions> options,
             Persistent = true,
             ContentType = "application/json",
             MessageId = messageId.ToString(),
+            CorrelationId = correlationId.ToString(),
             Type = messageType,
             Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
             Headers = new Dictionary<string, object?>
             {
                 ["message-id"] = messageId.ToString(),
+                ["correlation-id"] = correlationId.ToString(),
                 ["message-type"] = messageType
             }
         };
@@ -123,6 +126,7 @@ public class RabbitMqPublisher(IOptions<RabbitMqOptions> options,
         logger.LogInformation(
             "Publishing outbox message {MessageId} of type {MessageType} to exchange {ExchangeName} with routing key {RoutingKey}",
             messageId,
+            correlationId,
             messageType,
             _options.ExchangeName,
             routingKey);

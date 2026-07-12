@@ -17,6 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="..\OperaHouse.Booking.Application\OperaHouse.Booking.Application.csproj" />
     <ProjectReference Include="..\OperaHouse.Booking.Infrastructure\OperaHouse.Booking.Infrastructure.csproj" />
+    <ProjectReference Include="..\OperaHouse.Notification.Infrastructure\OperaHouse.Notification.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

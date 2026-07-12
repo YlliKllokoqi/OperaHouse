@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Json;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using OperaHouse.Contracts.Events;
 using OperaHouse.Messaging;
@@ -187,12 +186,20 @@ public class Worker(ILogger<Worker> logger,
                     throw new InvalidOperationException(
                         "BookingCreated message could not be deserialized.");
                 }
-                
-                logger.LogInformation(
-                    "Received BookingCreated message {MessageId} for booking {BookingId}",
-                    message.MessageId,
-                    message.BookingId);
 
+                var retryCount = GetRetryCount(eventArgs.BasicProperties);
+
+                using var loggingScope = logger.BeginScope(new Dictionary<string, object?>
+                {
+                    ["MessageId"] = message.MessageId,
+                    ["CorrelationId"] = message.CorrelationId,
+                    ["BookingId"] = message.BookingId,
+                    ["RoutingKey"] = eventArgs.RoutingKey,
+                    ["RetryCount"] = retryCount
+                });
+                
+                logger.LogInformation("Received BookingCreated message.");
+                
                 await using var scope = serviceScopeFactory.CreateAsyncScope();
 
                 var notificationProcessor = scope.ServiceProvider
@@ -203,8 +210,7 @@ public class Worker(ILogger<Worker> logger,
                     stoppingToken);
                 
                 logger.LogInformation(
-                    "Notification processing result for message {MessageId}: {Result}",
-                    message.MessageId,
+                    "Notification processing result: {Result}",
                     result);
 
                 await channel.BasicAckAsync(
@@ -212,9 +218,7 @@ public class Worker(ILogger<Worker> logger,
                     multiple: false,
                     cancellationToken: stoppingToken);
 
-                logger.LogInformation(
-                    "ACK sent for BookingCreated message {MessageId}",
-                    message.MessageId);
+                logger.LogInformation("ACK sent for BookingCreated message.");
             }
             catch (Exception e)
             {
@@ -228,9 +232,15 @@ public class Worker(ILogger<Worker> logger,
                 {
                     await PublishToRetryExchangeAsync(
                         channel,
-                        body: body,
+                        eventArgs,
+                        e,
                         retryCount: retryCount + 1,
                         stoppingToken);
+                    
+                    logger.LogWarning(
+                        "BookingCreated message sent to retry exchange. Retry attempt {RetryCount} of {MaxRetryAttempts}.",
+                        retryCount + 1,
+                        _options.BookingCreatedMaxRetryAttempts);
 
                     await channel.BasicAckAsync(
                         deliveryTag: eventArgs.DeliveryTag,
@@ -267,18 +277,31 @@ public class Worker(ILogger<Worker> logger,
 
     private async Task PublishToRetryExchangeAsync(
         IChannel channel,
-        ReadOnlyMemory<byte> body,
+        BasicDeliverEventArgs eventArgs,
+        Exception exception,
         int retryCount,
         CancellationToken cancellationToken)
     {
+        var now = DateTimeOffset.UtcNow.ToString("O");
+        var headers = CopyHeaders(eventArgs.BasicProperties.Headers);
+        
+        headers.TryAdd("x-original-exchange", eventArgs.Exchange);
+        headers.TryAdd("x-original-routing-key", eventArgs.RoutingKey);
+        headers.TryAdd("x-first-failed-at", now);
+
+        headers["x-retry-count"] = retryCount;
+        headers["x-last-failed-at"] = now;
+        headers["x-last-error"] = exception.Message;
+        
         var retryProperties = new BasicProperties
         {
             Persistent = true,
-            ContentType = "application/json",
-            Headers = new Dictionary<string, object?>
-            {
-                ["x-retry-count"] = retryCount
-            }
+            ContentType = eventArgs.BasicProperties.ContentType ?? "application/json",
+            MessageId = eventArgs.BasicProperties.MessageId,
+            CorrelationId = eventArgs.BasicProperties.CorrelationId,
+            Type = eventArgs.BasicProperties.Type,
+            Timestamp = eventArgs.BasicProperties.Timestamp,
+            Headers = headers
         };
 
         await channel.BasicPublishAsync(
@@ -286,8 +309,26 @@ public class Worker(ILogger<Worker> logger,
             routingKey: _options.BookingCreatedRetryRoutingKey,
             mandatory: false,
             basicProperties: retryProperties,
-            body: body,
+            body: eventArgs.Body,
             cancellationToken: cancellationToken);
+    }
+    
+    private static Dictionary<string, object?> CopyHeaders(
+        IDictionary<string, object?>? sourceHeaders)
+    {
+        var headers = new Dictionary<string, object?>();
+
+        if (sourceHeaders is null)
+        {
+            return headers;
+        }
+
+        foreach (var header in sourceHeaders)
+        {
+            headers[header.Key] = header.Value;
+        }
+
+        return headers;
     }
 
     private static int GetRetryCount(IReadOnlyBasicProperties properties)

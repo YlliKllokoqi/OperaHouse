@@ -72,6 +72,7 @@ public sealed class OutboxPublisherWorker(
                     payload: message.Payload,
                     routingKey: message.RoutingKey,
                     messageId: message.MessageId,
+                    correlationId: message.CorrelationId,
                     messageType: message.Type,
                     cancellationToken: cancellationToken);
 

@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\OperaHouse.Booking.Infrastructure\OperaHouse.Booking.Infrastructure.csproj" />
     <ProjectReference Include="..\OperaHouse.Notification.Application\OperaHouse.Notification.Application.csproj" />
     <ProjectReference Include="..\OperaHouse.Notification.Domain\OperaHouse.Notification.Domain.csproj" />
   </ItemGroup>

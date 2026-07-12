@@ -1,9 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using OperaHouse.Messaging;
 using OperaHouse.Notification.Application.Inbox;
 using OperaHouse.Notification.Application.Notifications;
 using OperaHouse.Notification.Infrastructure.Inbox;
 using OperaHouse.Notification.Infrastructure.Notifications;
+using OperaHouse.Notification.Infrastructure.HealthChecks;
 using OperaHouse.Notification.Infrastructure.Persistence;
 using OperaHouse.Notification.Worker;
 
@@ -23,8 +25,11 @@ builder.Services.AddScoped<INotificationRepository, NotificationRepository>();
 builder.Services.AddScoped<INotificationUnitOfWork, NotificationUnitOfWork>();
 builder.Services.AddScoped<IEmailSender, FakeEmailSender>();
 builder.Services.AddScoped<INotificationProcessor, NotificationProcessor>();
-
+builder.Services.AddHealthChecks()
+    .AddCheck<NotificationDatabaseHealthCheck>("notification-database")
+    .AddCheck<RabbitMqHealthCheck>("rabbitmq");
 builder.Services.AddHostedService<Worker>();
+builder.Services.AddHostedService<HealthLoggingWorker>();
 
 var host = builder.Build();
 host.Run();
