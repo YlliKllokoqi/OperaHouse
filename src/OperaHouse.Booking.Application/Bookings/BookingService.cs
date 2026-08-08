@@ -1,3 +1,6 @@
+using AutoMapper;
+using FluentValidation;
+using OperaHouse.Booking.Application.Common;
 using OperaHouse.Booking.Application.Performances;
 using OperaHouse.Booking.Domain.Bookings;
 using OperaHouse.Contracts.Events;
@@ -7,10 +10,13 @@ namespace OperaHouse.Booking.Application.Bookings;
 
 public sealed class BookingService(
     IBookingRepository bookingRepository,
-    IPerformanceRepository performanceRepository)
+    IPerformanceRepository performanceRepository,
+    IValidator<CreateBookingInput> inputValidator,
+    TimeProvider timeProvider,
+    IMapper mapper)
     : IBookingService
 {
-    public async Task<BookingDto?> GetByIdAsync(
+    public async Task<ApplicationResult<BookingDto>> GetByIdAsync(
         Guid id,
         CancellationToken cancellationToken)
     {
@@ -18,34 +24,58 @@ public sealed class BookingService(
             id,
             cancellationToken);
 
-        return booking is null
-            ? null
-            : ToDto(booking);
+        if (booking is null)
+        {
+            return ApplicationResult<BookingDto>.Failure(
+                new ApplicationError(
+                    "booking.not-found",
+                    "Booking was not found.",
+                    ApplicationErrorType.NotFound));
+        }
+
+        return ApplicationResult<BookingDto>.Success(
+            mapper.Map<BookingDto>(booking));
     }
 
-    public async Task<BookingDto?> CreateAsync(
-        Guid performanceId,
-        string customerEmail,
-        int seats,
+    public async Task<ApplicationResult<BookingDto>> CreateAsync(
+        CreateBookingInput input,
         CancellationToken cancellationToken)
     {
-        var performance = await performanceRepository.GetByIdAsync(
-            performanceId,
+        var validationResult = await inputValidator.ValidateAsync(
+            input,
             cancellationToken);
 
-        if (performance is null)
+        if (!validationResult.IsValid)
         {
-            return null;
+            return ApplicationResult<BookingDto>.Failure(
+                validationResult.ToApplicationError(
+                    "booking.validation",
+                    "The booking request is invalid."));
+        }
+
+        var performance = await performanceRepository.GetByIdAsync(
+            input.PerformanceId,
+            cancellationToken);
+
+        var currentTime = timeProvider.GetUtcNow();
+
+        if (performance is null || !performance.CanBeBooked(currentTime))
+        {
+            return ApplicationResult<BookingDto>.Failure(
+                new ApplicationError(
+                    "performance.unavailable",
+                    "Performance was not found or is unavailable.",
+                    ApplicationErrorType.NotFound));
         }
 
         var booking = new BookingEntity
         {
             Id = Guid.NewGuid(),
-            PerformanceId = performanceId,
-            CustomerEmail = customerEmail,
-            Seats = seats,
+            PerformanceId = input.PerformanceId,
+            CustomerEmail = input.CustomerEmail.Trim(),
+            Seats = input.Seats,
             Status = BookingStatus.Pending,
-            CreatedAt = DateTimeOffset.UtcNow
+            CreatedAt = currentTime
         };
 
         var messageId = Guid.NewGuid();
@@ -57,24 +87,14 @@ public sealed class BookingService(
             PerformanceId: booking.PerformanceId,
             CustomerEmail: booking.CustomerEmail,
             Seats: booking.Seats,
-            OccurredAt: DateTimeOffset.UtcNow);
+            OccurredAt: currentTime);
         
         await bookingRepository.AddAsync(
             booking,
             bookingCreated,
             cancellationToken);
 
-        return ToDto(booking);
-    }
-
-    private static BookingDto ToDto(BookingEntity booking)
-    {
-        return new BookingDto(
-            booking.Id,
-            booking.PerformanceId,
-            booking.CustomerEmail,
-            booking.Seats,
-            booking.Status,
-            booking.CreatedAt);
+        return ApplicationResult<BookingDto>.Success(
+            mapper.Map<BookingDto>(booking));
     }
 }

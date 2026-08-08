@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using OperaHouse.Booking.Api.Errors;
 using OperaHouse.Booking.Api.Models.Bookings;
 using OperaHouse.Booking.Application.Bookings;
 
@@ -13,13 +14,13 @@ public sealed class BookingsController(IBookingService bookingService) : Control
         Guid id,
         CancellationToken cancellationToken)
     {
-        var booking = await bookingService.GetByIdAsync(
+        var result = await bookingService.GetByIdAsync(
             id,
             cancellationToken);
 
-        return booking is null
-            ? NotFound()
-            : Ok(booking);
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : this.ToActionResult(result.Error!);
     }
 
     [HttpPost]
@@ -27,28 +28,21 @@ public sealed class BookingsController(IBookingService bookingService) : Control
         CreateBookingRequest request,
         CancellationToken cancellationToken)
     {
-        if (request.PerformanceId == Guid.Empty)
-        {
-            ModelState.AddModelError(
-                nameof(request.PerformanceId),
-                "PerformanceId is required.");
-
-            return ValidationProblem(ModelState);
-        }
-
-        var booking = await bookingService.CreateAsync(
+        var input = new CreateBookingInput(
             request.PerformanceId,
             request.CustomerEmail,
-            request.Seats,
+            request.Seats);
+
+        var result = await bookingService.CreateAsync(
+            input,
             cancellationToken);
 
-        if (booking is null)
+        if (!result.IsSuccess)
         {
-            return NotFound(new
-            {
-                Message = "Performance was not found."
-            });
+            return this.ToActionResult(result.Error!);
         }
+
+        var booking = result.Value!;
 
         return CreatedAtAction(
             nameof(GetById),

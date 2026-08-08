@@ -1,18 +1,18 @@
+using AutoMapper;
+
 namespace OperaHouse.Booking.Application.Performances;
 
-public sealed class PerformanceService(IPerformanceRepository performanceRepository) : IPerformanceService
+public sealed class PerformanceService(
+    IPerformanceRepository performanceRepository,
+    TimeProvider timeProvider,
+    IMapper mapper)
+    : IPerformanceService
 {
     public async Task<IReadOnlyList<PerformanceDto>> GetAllAsync(CancellationToken cancellationToken)
     {
-        var performances = await performanceRepository.GetAllAsync(cancellationToken);
+        var performances = await performanceRepository.GetPublishedUpcomingAsync(
+            timeProvider.GetUtcNow(), cancellationToken);
 
-        return performances
-            .Select(performance => new PerformanceDto(
-                performance.Id,
-                performance.Title,
-                performance.Venue,
-                performance.StartsAt,
-                performance.AvailableSeats))
-            .ToList();
+        return mapper.Map<List<PerformanceDto>>(performances);
     }
 }

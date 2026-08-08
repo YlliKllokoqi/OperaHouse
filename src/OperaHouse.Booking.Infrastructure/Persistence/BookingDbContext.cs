@@ -20,7 +20,6 @@ public sealed class BookingDbContext(
 
         ConfigureBookings(modelBuilder);
         ConfigurePerformances(modelBuilder);
-        SeedPerformances(modelBuilder);
     }
 
     private static void ConfigureBookings(ModelBuilder modelBuilder)
@@ -96,7 +95,19 @@ public sealed class BookingDbContext(
     {
         modelBuilder.Entity<Performance>(performance =>
         {
-            performance.ToTable("Performances");
+            performance.ToTable(
+                "Performances",
+                table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_Performances_Capacity_Positive",
+                        "\"Capacity\" > 0");
+
+                    table.HasCheckConstraint(
+                        "CK_Performances_AvailableSeats_Range",
+                        "\"AvailableSeats\" >= 0 AND "
+                        + "\"AvailableSeats\" <= \"Capacity\"");
+                });
 
             performance.HasKey(x => x.Id);
 
@@ -108,43 +119,34 @@ public sealed class BookingDbContext(
                 .HasMaxLength(200)
                 .IsRequired();
 
+            performance.Property(x => x.Status)
+                .HasConversion<string>()
+                .HasMaxLength(50)
+                .IsRequired();
+
             performance.Property(x => x.StartsAt)
+                .IsRequired();
+
+            performance.Property(x => x.Capacity)
                 .IsRequired();
 
             performance.Property(x => x.AvailableSeats)
                 .IsRequired();
-        });
-    }
 
-    private static void SeedPerformances(ModelBuilder modelBuilder)
-    {
-        modelBuilder.Entity<Performance>().HasData(
-            new Performance
+            performance.Property(x => x.CreatedAt)
+                .IsRequired();
+
+            performance.Property(x => x.UpdatedAt)
+                .IsRequired();
+
+            performance.Property(x => x.CancellationReason)
+                .HasMaxLength(1_000);
+
+            performance.HasIndex(x => new
             {
-                Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
-                Title = "La Traviata",
-                Venue = "OperaHouse Main Hall",
-                StartsAt = new DateTimeOffset(
-                    2027, 10, 10, 19, 0, 0, TimeSpan.Zero),
-                AvailableSeats = 500
-            },
-            new Performance
-            {
-                Id = Guid.Parse("22222222-2222-2222-2222-222222222222"),
-                Title = "The Magic Flute",
-                Venue = "OperaHouse Main Hall",
-                StartsAt = new DateTimeOffset(
-                    2027, 11, 15, 19, 30, 0, TimeSpan.Zero),
-                AvailableSeats = 450
-            },
-            new Performance
-            {
-                Id = Guid.Parse("33333333-3333-3333-3333-333333333333"),
-                Title = "Beethoven Symphony No. 9",
-                Venue = "OperaHouse Concert Hall",
-                StartsAt = new DateTimeOffset(
-                    2027, 12, 5, 20, 0, 0, TimeSpan.Zero),
-                AvailableSeats = 600
+                x.Status,
+                x.StartsAt
             });
+        });
     }
 }

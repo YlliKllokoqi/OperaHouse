@@ -1,14 +1,14 @@
+using OperaHouse.Booking.Application.Common;
+
 namespace OperaHouse.Booking.Application.Bookings;
 
 public interface IBookingService
 {
-    Task<BookingDto?> GetByIdAsync(
+    Task<ApplicationResult<BookingDto>> GetByIdAsync(
         Guid id,
         CancellationToken cancellationToken);
 
-    Task<BookingDto?> CreateAsync(
-        Guid performanceId,
-        string customerEmail,
-        int seats,
+    Task<ApplicationResult<BookingDto>> CreateAsync(
+        CreateBookingInput input,
         CancellationToken cancellationToken);
 }

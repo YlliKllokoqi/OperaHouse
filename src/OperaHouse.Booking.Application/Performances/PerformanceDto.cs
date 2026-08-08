@@ -1,3 +1,5 @@
+using OperaHouse.Booking.Domain.Performances;
+
 namespace OperaHouse.Booking.Application.Performances;
 
 public record PerformanceDto(
@@ -5,4 +7,11 @@ public record PerformanceDto(
     string Title,
     string Venue,
     DateTimeOffset StartsAt,
-    int AvailableSeats);
+    int Capacity,
+    int AvailableSeats,
+    PerformanceStatus Status,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt,
+    DateTimeOffset? PublishedAt,
+    DateTimeOffset? CancelledAt,
+    string? CancellationReason);

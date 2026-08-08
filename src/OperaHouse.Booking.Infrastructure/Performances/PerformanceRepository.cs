@@ -7,11 +7,25 @@ namespace OperaHouse.Booking.Infrastructure.Performances;
 
 public sealed class PerformanceRepository(BookingDbContext dbContext) : IPerformanceRepository
 {
-    public async Task<IReadOnlyList<Performance>> GetAllAsync(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<Performance>> GetPublishedUpcomingAsync(
+        DateTimeOffset currentTime,
+        CancellationToken cancellationToken)
     {
         return await dbContext.Performances
             .AsNoTracking()
-            .OrderBy(performance => performance.StartsAt)
+            .Where(p =>
+                p.Status == PerformanceStatus.Published
+                && p.StartsAt > currentTime)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Performance>>
+        GetAllForAdministrationAsync(
+            CancellationToken cancellationToken)
+    {
+        return await dbContext.Performances
+            .AsNoTracking()
+            .OrderByDescending(performance => performance.CreatedAt)
             .ToListAsync(cancellationToken);
     }
 
@@ -20,9 +34,22 @@ public sealed class PerformanceRepository(BookingDbContext dbContext) : IPerform
         CancellationToken cancellationToken)
     {
         return await dbContext.Performances
-            .AsNoTracking()
             .SingleOrDefaultAsync(
                 performance => performance.Id == id,
                 cancellationToken);
+    }
+
+    public async Task AddAsync(
+        Performance performance,
+        CancellationToken cancellationToken)
+    {
+        await dbContext.Performances.AddAsync(
+            performance,
+            cancellationToken);
+    }
+
+    public Task SaveChangesAsync(CancellationToken cancellationToken)
+    {
+        return dbContext.SaveChangesAsync(cancellationToken);
     }
 }
