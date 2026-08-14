@@ -25,10 +25,12 @@ public sealed class BookingsController(IBookingService bookingService) : Control
 
     [HttpPost]
     public async Task<ActionResult<BookingDto>> Create(
+        [FromHeader(Name = "Idempotency-Key")] Guid idempotencyKey,
         CreateBookingRequest request,
         CancellationToken cancellationToken)
     {
         var input = new CreateBookingInput(
+            idempotencyKey,
             request.PerformanceId,
             request.CustomerEmail,
             request.Seats);

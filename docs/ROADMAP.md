@@ -126,6 +126,17 @@ Keep admin HTTP endpoints in an `Admin` area of `OperaHouse.Booking.Api` while r
 - [ ] Release seats when an unpaid booking expires or is cancelled.
 - [ ] Add database-level concurrency protection and tests.
 
+### 4.1 Complete booking expiration messaging and notification flow
+
+- [ ] Add a self-contained `BookingExpired` integration event, including the customer email required by Notification, and save it through the Booking outbox in the same transaction that expires the booking and releases its seats.
+- [ ] Publish the event to `operahouse.events` using the `booking.expired` routing key, persistent messages, and publisher confirms.
+- [ ] Declare a durable `notification-booking-expired.queue` and bind it to `booking.expired`.
+- [ ] Add dedicated durable retry and dead-letter topology for expiration notifications, following the existing delayed-retry and DLQ practices.
+- [ ] Add a `BookingExpired` consumer to the Notification Worker using manual ACK/NACK behavior, transient/permanent failure handling, correlation-aware logging, and the existing inbox/idempotency protections.
+- [ ] Persist the expiration notification result and send a real email informing the customer that the reservation expired and its seats were released.
+- [ ] Verify the complete flow end to end: booking expires, seats are released once, the outbox event is published once, the consumer processes duplicate deliveries safely, and the expiration email is sent.
+- [ ] Do not publish `BookingExpired` before its complete queue topology and consumer are implemented; RabbitMQ is not an event archive and an unrouted event would be discarded.
+
 This phase must precede payment integration because payment must not succeed for seats the system cannot guarantee.
 
 ## Phase 5 — Payments

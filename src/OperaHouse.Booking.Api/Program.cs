@@ -8,6 +8,7 @@ using OperaHouse.Booking.Application.Bookings;
 using OperaHouse.Booking.Application.Mapping;
 using OperaHouse.Booking.Application.Performances;
 using OperaHouse.Booking.Application.Validation;
+using OperaHouse.Booking.Domain.Bookings;
 using OperaHouse.Booking.Infrastructure.Bookings;
 using OperaHouse.Booking.Infrastructure.Outbox;
 using OperaHouse.Booking.Infrastructure.Performances;
@@ -20,6 +21,20 @@ var connectionString = builder.Configuration.GetConnectionString("BookingDatabas
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddOptions<BookingOptions>()
+    .Bind(
+        builder.Configuration.GetSection(BookingOptions.SectionName))
+    .Validate(
+        options => options.ReservationDurationMinutes > 0,
+        "Booking reservation duration must be greater than zero.")
+    .Validate(
+        options => options.ExpirationCheckIntervalSeconds > 0,
+        "Booking expiration interval must be greater than zero.")
+    .Validate(
+        options => options.ExpirationBatchSize > 0,
+        "Booking expiration batch size must be greater than zero.")
+    .ValidateOnStart();
+
 builder.Services.AddSwaggerGen(options =>
 {
     options.AddSecurityDefinition(
@@ -46,6 +61,7 @@ builder.Services.Configure<RabbitMqOptions>(
     builder.Configuration.GetSection("RabbitMq"));
 builder.Services.AddScoped<RabbitMqPublisher>();
 builder.Services.AddHostedService<OutboxPublisherWorker>();
+builder.Services.AddHostedService<BookingExpirationWorker>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddAutoMapper(
     _ => { },

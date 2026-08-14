@@ -1,5 +1,6 @@
 using AutoMapper;
 using FluentValidation;
+using Microsoft.Extensions.Options;
 using OperaHouse.Booking.Application.Common;
 using OperaHouse.Booking.Application.Performances;
 using OperaHouse.Booking.Domain.Bookings;
@@ -10,8 +11,8 @@ namespace OperaHouse.Booking.Application.Bookings;
 
 public sealed class BookingService(
     IBookingRepository bookingRepository,
-    IPerformanceRepository performanceRepository,
     IValidator<CreateBookingInput> inputValidator,
+    IOptions<BookingOptions> bookingOptions,
     TimeProvider timeProvider,
     IMapper mapper)
     : IBookingService
@@ -53,48 +54,60 @@ public sealed class BookingService(
                     "The booking request is invalid."));
         }
 
-        var performance = await performanceRepository.GetByIdAsync(
-            input.PerformanceId,
-            cancellationToken);
-
         var currentTime = timeProvider.GetUtcNow();
+        var expiresAt = currentTime
+            .AddMinutes(bookingOptions
+                .Value
+                .ReservationDurationMinutes);
 
-        if (performance is null || !performance.CanBeBooked(currentTime))
-        {
-            return ApplicationResult<BookingDto>.Failure(
-                new ApplicationError(
-                    "performance.unavailable",
-                    "Performance was not found or is unavailable.",
-                    ApplicationErrorType.NotFound));
-        }
-
-        var booking = new BookingEntity
-        {
-            Id = Guid.NewGuid(),
-            PerformanceId = input.PerformanceId,
-            CustomerEmail = input.CustomerEmail.Trim(),
-            Seats = input.Seats,
-            Status = BookingStatus.Pending,
-            CreatedAt = currentTime
-        };
-
-        var messageId = Guid.NewGuid();
-
+        var booking = new BookingEntity(
+            id: Guid.NewGuid(),
+            idempotencyKey: input.IdempotencyKey,
+            performanceId: input.PerformanceId,
+            customerEmail: input.CustomerEmail,
+            seats: input.Seats,
+            createdAt: currentTime,
+            expiresAt: expiresAt);
+        
         var bookingCreated = new BookingCreated(
-            MessageId: messageId,
+            MessageId: Guid.NewGuid(),
             CorrelationId: Guid.NewGuid(),
             BookingId: booking.Id,
             PerformanceId: booking.PerformanceId,
             CustomerEmail: booking.CustomerEmail,
             Seats: booking.Seats,
+            ExpiresAt: booking.ExpiresAt,
             OccurredAt: currentTime);
-        
-        await bookingRepository.AddAsync(
+
+        var persistenceResult = await bookingRepository.TryCreateAsync(
             booking,
             bookingCreated,
+            currentTime,
             cancellationToken);
 
-        return ApplicationResult<BookingDto>.Success(
-            mapper.Map<BookingDto>(booking));
+        return persistenceResult.Outcome switch
+        {
+            BookingCreationOutcome.Created
+                or BookingCreationOutcome.Existing =>
+                ApplicationResult<BookingDto>.Success(
+                    mapper.Map<BookingDto>(persistenceResult.Booking!)),
+
+            BookingCreationOutcome.PerformanceUnavailable =>
+                ApplicationResult<BookingDto>.Failure(
+                    new ApplicationError(
+                        "performance.unavailable",
+                        "the performance is unavailable or does not have enough available seats.",
+                        ApplicationErrorType.Conflict
+                    )),
+
+            BookingCreationOutcome.IdempotencyConflict =>
+                ApplicationResult<BookingDto>.Failure(
+                    new ApplicationError(
+                        "booking.idempotency-conflict",
+                        "The Idempotency-Key was already used for a different booking request.",
+                        ApplicationErrorType.Conflict)),
+
+            _ => throw new InvalidOperationException("Unknown booking creation outcome.")
+        };
     }
 }

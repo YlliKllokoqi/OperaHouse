@@ -1,3 +1,3 @@
 namespace OperaHouse.Booking.Application.Bookings;
 
-public record ExpiringBooking();
+public sealed record ExpiringBooking(Guid BookingId, Guid PerformanceId, int Seats);

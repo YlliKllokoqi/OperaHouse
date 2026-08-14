@@ -17,4 +17,5 @@ public class RabbitMqOptions
     public string BookingCreatedRetryRoutingKey { get; init; } = "booking.created.retry";
     public int BookingCreatedRetryDelayMilliseconds { get; init; } = 10000;
     public int BookingCreatedMaxRetryAttempts { get; init; } = 3;
+    public string BookingExpiredRoutingKey { get; init; } = "booking.expired";
 }

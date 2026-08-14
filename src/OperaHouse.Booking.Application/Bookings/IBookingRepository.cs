@@ -9,8 +9,20 @@ public interface IBookingRepository
         Guid id,
         CancellationToken cancellationToken);
 
-    Task AddAsync(
+    Task<BookingCreationPersistenceResult> TryCreateAsync(
         BookingEntity booking,
         BookingCreated bookingCreated,
+        DateTimeOffset currentTime,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<ExpiringBooking>> GetExpiringBookingAsync(
+        DateTimeOffset currentTime,
+        int batchSize,
+        CancellationToken cancellationToken);
+
+    Task<bool> TryExpireAsync(
+        ExpiringBooking booking,
+        BookingExpired bookingExpired,
+        DateTimeOffset currentTime,
         CancellationToken cancellationToken);
 }

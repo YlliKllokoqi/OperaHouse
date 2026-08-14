@@ -7,6 +7,10 @@ public sealed class CreateBookingInputValidator
 {
     public CreateBookingInputValidator()
     {
+        RuleFor(input => input.IdempotencyKey)
+            .NotEmpty()
+            .WithMessage("Idempotency-Key header is required");
+        
         RuleFor(input => input.PerformanceId)
             .NotEmpty()
             .WithMessage("PerformanceId is required.");

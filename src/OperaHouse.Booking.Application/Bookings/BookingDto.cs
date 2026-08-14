@@ -8,4 +8,8 @@ public sealed record BookingDto(
     string CustomerEmail,
     int Seats,
     BookingStatus Status,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    DateTimeOffset ExpiresAt,
+    DateTimeOffset? ConfirmedAt,
+    DateTimeOffset? ExpiredAt,
+    DateTimeOffset? CancelledAt);

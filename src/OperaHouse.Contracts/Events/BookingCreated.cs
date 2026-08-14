@@ -7,4 +7,5 @@ public record BookingCreated(
     Guid PerformanceId,
     string CustomerEmail,
     int Seats,
+    DateTimeOffset ExpiresAt,
     DateTimeOffset OccurredAt);

@@ -26,9 +26,26 @@ public sealed class BookingDbContext(
     {
         modelBuilder.Entity<Domain.Bookings.Booking>(booking =>
         {
-            booking.ToTable("Bookings");
+            booking.ToTable("Bookings",
+                table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_Bookings_Seats_Positive",
+                        "\"Seats\" > 0");
+                    table.HasCheckConstraint(
+                        "CK_Bookings_Expiration_After_Creation",
+                        "\"ExpiresAt\" > \"CreatedAt\"");
+                });
 
             booking.HasKey(x => x.Id);
+
+            booking.Property(x => x.IdempotencyKey)
+                .IsRequired();
+
+            booking.HasIndex(x => x.IdempotencyKey)
+                .IsUnique()
+                .HasDatabaseName(
+                    "UX_Bookings_IdempotencyKey");
 
             booking.Property(x => x.CustomerEmail)
                 .HasMaxLength(320)
@@ -44,6 +61,12 @@ public sealed class BookingDbContext(
 
             booking.Property(x => x.CreatedAt)
                 .IsRequired();
+
+            booking.HasIndex(x => new
+            {
+                x.Status,
+                x.ExpiresAt
+            });
 
             booking.HasOne<Performance>()
                 .WithMany()
