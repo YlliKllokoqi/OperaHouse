@@ -208,17 +208,6 @@ All important exchanges and queues are durable. Published business messages are 
 - [Project collaboration rules](PROJECT_RULES.md)
 - Additional design and use-case documents are available in the `docs` directory.
 
-## Current milestone
-
-Phase 1 and the messaging reliability work in Phase 2 are implemented. Phase 3 administration and performance management is implemented in code; its database migration and complete lifecycle still require local end-to-end verification.
-
-The current Phase 3 verification steps are:
-
-1. Apply the `AddPerformanceAdministration` migration.
-2. Verify anonymous requests receive `401` from admin endpoints.
-3. Verify an Admin JWT can create, update, publish, and cancel performances.
-4. Verify only published future performances are visible and bookable publicly.
-
 See the [roadmap](docs/ROADMAP.md) for payments, ticketing, invoicing, observability, testing, security, and Azure deployment plans.
 
 ## Important production note
