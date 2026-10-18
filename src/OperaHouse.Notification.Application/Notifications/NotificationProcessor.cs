@@ -14,7 +14,8 @@ public sealed class NotificationProcessor(
     ILogger<NotificationProcessor> logger)
     : INotificationProcessor
 {
-    private const string ConsumerName = "OperaHouse.Notification.Worker";
+    private const string BookingCreatedConsumerName = "OperaHouse.Notification.Worker";
+    private const string BookingExpiredConsumerName = "OperaHouse.Notification.BookingExpired";
 
     public async Task<NotificationProcessingResult> ProcessBookingCreatedAsync(
         BookingCreated message,
@@ -22,7 +23,7 @@ public sealed class NotificationProcessor(
     {
         var inboxMessage = await inboxRepository.GetByMessageAsync(
             message.MessageId,
-            ConsumerName,
+            BookingCreatedConsumerName,
             cancellationToken);
 
         if (inboxMessage?.Status == InboxMessageStatus.Processed)
@@ -30,7 +31,7 @@ public sealed class NotificationProcessor(
             logger.LogInformation(
                 "Message {MessageId} was already processed by {Consumer}.",
                 message.MessageId,
-                ConsumerName);
+                BookingCreatedConsumerName);
 
             return NotificationProcessingResult.Duplicate;
         }
@@ -42,7 +43,7 @@ public sealed class NotificationProcessor(
                 Id = Guid.NewGuid(),
                 MessageId = message.MessageId,
                 MessageType = nameof(BookingCreated),
-                Consumer = ConsumerName,
+                Consumer = BookingCreatedConsumerName,
                 Status = InboxMessageStatus.Processing,
                 ReceivedAt = DateTimeOffset.UtcNow
             };
@@ -73,6 +74,110 @@ public sealed class NotificationProcessor(
                 Body = $"Your booking {message.BookingId} was received.",
                 Status = NotificationStatus.Pending,
                 CreatedAt = DateTimeOffset.UtcNow
+            };
+
+            await notificationRepository.AddAsync(
+                notification,
+                cancellationToken);
+        }
+
+        try
+        {
+            await emailSender.SendAsync(
+                notification.Recipient,
+                notification.Subject,
+                notification.Body,
+                cancellationToken);
+
+            notification.Status = NotificationStatus.Sent;
+            notification.SentAt = DateTimeOffset.UtcNow;
+            notification.FailedAt = null;
+            notification.FailureReason = null;
+
+            inboxMessage.Status = InboxMessageStatus.Processed;
+            inboxMessage.ProcessedAt = DateTimeOffset.UtcNow;
+            inboxMessage.LastError = null;
+
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+
+            return NotificationProcessingResult.Processed;
+        }
+        catch (Exception exception)
+        {
+            notification.Status = NotificationStatus.Failed;
+            notification.FailedAt = DateTimeOffset.UtcNow;
+            notification.FailureReason = exception.Message;
+
+            inboxMessage.Status = InboxMessageStatus.Failed;
+            inboxMessage.LastError = exception.Message;
+
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+
+            throw;
+        }
+    }
+
+    public async Task<NotificationProcessingResult> ProcessBookingExpiredAsync(
+        BookingExpired message,
+        CancellationToken cancellationToken)
+    {
+        var inboxMessage = await inboxRepository.GetByMessageAsync(
+            message.MessageId,
+            BookingExpiredConsumerName,
+            cancellationToken);
+
+        if (inboxMessage?.Status == InboxMessageStatus.Processed)
+        {
+            logger.LogInformation(
+                "Message {MessageId} was already processed by {Consumer}.",
+                message.MessageId,
+                BookingExpiredConsumerName);
+
+            return NotificationProcessingResult.Duplicate;
+        }
+
+        if (inboxMessage is null)
+        {
+            inboxMessage = new InboxMessage
+            {
+                Id = Guid.NewGuid(),
+                MessageId = message.MessageId,
+                MessageType = nameof(BookingExpired),
+                Consumer = BookingExpiredConsumerName,
+                Status = InboxMessageStatus.Processing,
+                ReceivedAt = DateTimeOffset.UtcNow
+            };
+
+            await inboxRepository.AddAsync(
+                inboxMessage,
+                cancellationToken);
+        }
+        else
+        {
+            inboxMessage.Status = InboxMessageStatus.Processing;
+            inboxMessage.LastError = null;
+        }
+
+        var notification =
+            await notificationRepository.GetByInboxMessageIdAsync(
+                inboxMessage.Id,
+                cancellationToken);
+
+        if (notification is null)
+        {
+            notification = new NotificationMessage
+            {
+                Id = Guid.NewGuid(),
+                InboxMessageId = inboxMessage.Id,
+                Type = "BookingExpiration",
+                Subject = "Your OperaHouse reservation expired",
+                Body =
+                    $"Your reservation for booking {message.BookingId} " +
+                    $"expired. The {message.Seats} reserved seat(s) " +
+                    "were released.",
+                Status = NotificationStatus.Pending,
+                CreatedAt = DateTimeOffset.UtcNow,
+                Recipient = message.CustomerEmail
             };
 
             await notificationRepository.AddAsync(

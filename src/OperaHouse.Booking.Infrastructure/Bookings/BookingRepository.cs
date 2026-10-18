@@ -136,6 +136,7 @@ public sealed class BookingRepository(
             .Select(booking => new ExpiringBooking(
                 booking.Id,
                 booking.PerformanceId,
+                booking.CustomerEmail,
                 booking.Seats))
             .ToListAsync(cancellationToken);
     }
@@ -198,7 +199,7 @@ public sealed class BookingRepository(
                 bookingExpired.CorrelationId,
                 nameof(BookingExpired),
                 _rabbitMqOptions.BookingExpiredRoutingKey,
-                bookingExpired.OccuredAt,
+                bookingExpired.OccurredAt,
                 bookingExpired),
             cancellationToken);
 

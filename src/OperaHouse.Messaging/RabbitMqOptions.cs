@@ -18,4 +18,17 @@ public class RabbitMqOptions
     public int BookingCreatedRetryDelayMilliseconds { get; init; } = 10000;
     public int BookingCreatedMaxRetryAttempts { get; init; } = 3;
     public string BookingExpiredRoutingKey { get; init; } = "booking.expired";
+    public string BookingExpiredQueueName { get; init; } = "notification-booking-expired.queue";
+
+    public string BookingExpiredRetryQueueName { get; init; } = "notification-booking-expired.retry.queue";
+
+    public string BookingExpiredRetryRoutingKey { get; init; } = "booking.expired.retry";
+
+    public int BookingExpiredRetryDelayMilliseconds { get; init; } = 10_000;
+
+    public int BookingExpiredMaxRetryAttempts { get; init; } = 3;
+
+    public string BookingExpiredDeadLetterQueueName { get; init; } = "notification-booking-expired.dead-letter.queue";
+
+    public string BookingExpiredDeadLetterRoutingKey { get; init; } = "booking.expired.dead";
 }

@@ -162,6 +162,16 @@ public class Worker(ILogger<Worker> logger,
             arguments: null,
             cancellationToken: stoppingToken);
 
+        await DeclareBookingExpiredTopologyAsync(
+            channel,
+            stoppingToken);
+        
+        logger.LogInformation(
+            "Binding expiration queue {QueueName} to exchange {ExchangeName} using routing key {RoutingKey}.",
+            _options.BookingExpiredQueueName,
+            _options.ExchangeName,
+            _options.BookingExpiredRoutingKey);
+
         await channel.BasicQosAsync(
             prefetchSize: 0,
             prefetchCount: 1,
@@ -310,6 +320,69 @@ public class Worker(ILogger<Worker> logger,
             mandatory: false,
             basicProperties: retryProperties,
             body: eventArgs.Body,
+            cancellationToken: cancellationToken);
+    }
+
+    private async Task DeclareBookingExpiredTopologyAsync(
+        IChannel channel,
+        CancellationToken cancellationToken)
+    {
+        await channel.QueueDeclareAsync(
+            queue: _options.BookingExpiredDeadLetterQueueName,
+            durable: true,
+            exclusive: false,
+            autoDelete: false,
+            arguments: null,
+            cancellationToken: cancellationToken);
+
+        await channel.QueueBindAsync(
+            queue: _options.BookingExpiredDeadLetterQueueName,
+            exchange: _options.DeadLetterExchangeName,
+            routingKey: _options.BookingExpiredDeadLetterRoutingKey,
+            arguments: null,
+            cancellationToken: cancellationToken);
+
+        var mainQueueArguments = new Dictionary<string, object?>
+        {
+            ["x-dead-letter-exchange"] = _options.DeadLetterExchangeName,
+            ["x-dead-letter-routing-key"] = _options.BookingExpiredDeadLetterRoutingKey
+        };
+        
+        await channel.QueueDeclareAsync(
+            queue: _options.BookingExpiredQueueName,
+            durable: true,
+            exclusive: false,
+            autoDelete: false,
+            arguments: mainQueueArguments,
+            cancellationToken: cancellationToken);
+
+        await channel.QueueBindAsync(
+            queue: _options.BookingExpiredQueueName,
+            exchange: _options.ExchangeName,
+            routingKey: _options.BookingExpiredRoutingKey,
+            arguments: null,
+            cancellationToken: cancellationToken);
+
+        var retryQueueArguments = new Dictionary<string, object?>
+        {
+            ["x-message-ttl"] = _options.BookingExpiredRetryDelayMilliseconds,
+            ["x-dead-letter-exchange"] = _options.ExchangeName,
+            ["x-dead-letter-routing-key"] = _options.BookingExpiredRoutingKey
+        };
+
+        await channel.QueueDeclareAsync(
+            queue: _options.BookingExpiredRetryQueueName,
+            durable: true,
+            exclusive: false,
+            autoDelete: false,
+            arguments: retryQueueArguments,
+            cancellationToken: cancellationToken);
+
+        await channel.QueueBindAsync(
+            queue: _options.BookingExpiredRetryQueueName,
+            exchange: _options.RetryExchangeName,
+            routingKey: _options.BookingExpiredRetryRoutingKey,
+            arguments: null,
             cancellationToken: cancellationToken);
     }
     

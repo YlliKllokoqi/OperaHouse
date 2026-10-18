@@ -4,6 +4,7 @@ public sealed record BookingExpired(
     Guid MessageId,
     Guid CorrelationId,
     Guid BookingId,
-    Guid PerformanceId, 
+    Guid PerformanceId,
+    string CustomerEmail,
     int Seats,
-    DateTimeOffset OccuredAt);
+    DateTimeOffset OccurredAt);

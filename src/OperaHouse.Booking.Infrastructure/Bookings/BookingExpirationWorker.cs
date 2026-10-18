@@ -18,7 +18,7 @@ public sealed class BookingExpirationWorker(
 
     protected override async Task ExecuteAsync(CancellationToken cancellationToken)
     {
-        logger.LogInformation("BOoking expiration worker started.");
+        logger.LogInformation("Booking expiration worker started.");
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -46,9 +46,6 @@ public sealed class BookingExpirationWorker(
             {
                 break;
             }
-        }
-        {
-            
         }
     }
 
@@ -84,8 +81,9 @@ public sealed class BookingExpirationWorker(
                 BookingId: candidate.BookingId,
                 PerformanceId:
                 candidate.PerformanceId,
+                CustomerEmail: candidate.CustomerEmail,
                 Seats: candidate.Seats,
-                OccuredAt: currentTime);
+                OccurredAt: currentTime);
             
             var expired =
                 await repository.TryExpireAsync(

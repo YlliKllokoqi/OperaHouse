@@ -61,7 +61,7 @@ public class Booking
         Id = id;
         IdempotencyKey = idempotencyKey;
         PerformanceId = performanceId;
-        CustomerEmail = customerEmail;
+        CustomerEmail = customerEmail.Trim();
         Seats = seats;
         Status = BookingStatus.Pending;
         CreatedAt = createdAt;
