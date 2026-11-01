@@ -1,143 +1,91 @@
-# Messaging Debugging Runbook
+# Messaging debugging runbook
 
-This document explains how to inspect and debug the OperaHouse messaging flow.
+Use this guide to inspect the implemented created/expired event flow. The [architecture guide](ARCHITECTURE.md) explains ownership; the [Chapter 4 guide](CHAPTER-4-IMPLEMENTATION.md) records pending cancellation, failure-classification, replay, and infrastructure checks.
 
-## Expected message flow
+## Expected flow
 
 ```text
-POST /bookings
-  ↓
-Booking is saved in Postgres
-  ↓
-OutboxMessage is saved in Postgres
-  ↓
-OutboxPublisherWorker publishes BookingCreated to RabbitMQ
-  ↓
-RabbitMQ routes message to notification-booking-created.queue
-  ↓
-Notification.Worker consumes the message
-  ↓
-Notification inbox records the message as Processed
-  ↓
-Notification message is marked as Sent
+Booking creation / expiration
+  → booking state + seat update + outbox committed together
+  → OutboxPublisherWorker publishes with stable message ID and confirms
+  → RabbitMQ routes to the event's notification queue
+  → Notification Worker dispatches to its send feature
+  → shared processor checks inbox, submits email, saves the outcome
+  → worker ACKs the delivery
 ```
 
-## Docker containers
+The reservation outbox and publisher live under `Shared/Persistence/OperaHouse.Persistence/Outbox`. Notification's inbox and email records live in `Notification/OperaHouse.Notification/Persistence`. Repeated publication/delivery is expected; completed inbox records prevent repeating completed processing.
 
-Check running containers:
+## Start and inspect infrastructure
 
-```powershell
-docker compose ps
-```
+Run from the repository root:
 
-Start infrastructure:
-
-```powershell
+```sh
 docker compose up -d
-```
-
-Stop infrastructure:
-
-```powershell
-docker compose down
-```
-
-View RabbitMQ logs:
-
-```powershell
+docker compose ps
 docker logs operahouse-rabbitmq
-```
-
-View Postgres logs:
-
-```powershell
 docker logs operahouse-postgres
 ```
 
-## RabbitMQ Management UI
+PostgreSQL's host port is `54400`; RabbitMQ uses `5672`. The Management UI is [http://localhost:15672](http://localhost:15672). Local broker credentials are `operahouse` / `operahouse`, as defined in `docker-compose.yml`.
 
-URL:
+To stop the local containers while retaining their named volumes:
 
-```text
-http://localhost:15672
+```sh
+docker compose down
 ```
 
-Credentials:
+## Apply migrations and start the application
 
-```text
-operahouse / operahouse
+```sh
+dotnet ef database update --project src/Shared/Persistence/OperaHouse.Persistence --startup-project src/Api/OperaHouse.Api --context BookingDbContext
+dotnet ef database update --project src/Notification/OperaHouse.Notification --startup-project src/Api/OperaHouse.Api --context NotificationDbContext
 ```
 
-Important exchanges:
+Start the single application host:
 
-```text
-operahouse.events
-operahouse.retry
-operahouse.dead-letter
+```sh
+dotnet run --project src/Api/OperaHouse.Api
 ```
 
-Important queues:
+The API host runs the Notification consumer, outbox publisher, reservation expiration, and health logging. Their implementations live in the business/shared projects. Both contexts use the same local PostgreSQL database with separate models; migration identities and table mappings are preserved.
 
-```text
-notification-booking-created.queue
-notification-booking-created.retry.queue
-notification-booking-created.dead-letter.queue
-```
+## Exchanges and routes
 
-## Inspect RabbitMQ queues from terminal
+| Purpose | Name |
+| --- | --- |
+| Events exchange | `operahouse.events` |
+| Retry exchange | `operahouse.retry` |
+| Dead-letter exchange | `operahouse.dead-letter` |
+| Created route | `booking.created` |
+| Created retry route | `booking.created.retry` |
+| Created dead-letter route | `booking.created.dead` |
+| Expired route | `booking.expired` |
+| Expired retry route | `booking.expired.retry` |
+| Expired dead-letter route | `booking.expired.dead` |
 
-```powershell
+| Event | Main queue | Retry queue | Dead-letter queue |
+| --- | --- | --- | --- |
+| Created | `notification-booking-created.queue` | `notification-booking-created.retry.queue` | `notification-booking-created.dead-letter.queue` |
+| Expired | `notification-booking-expired.queue` | `notification-booking-expired.retry.queue` | `notification-booking-expired.dead-letter.queue` |
+
+Inspect queue counts:
+
+```sh
 docker exec operahouse-rabbitmq rabbitmqctl list_queues name messages_ready messages_unacknowledged messages arguments
 ```
 
-Useful meanings:
+- `messages_ready`: queued and waiting for delivery.
+- `messages_unacknowledged`: delivered but not yet ACKed/NACKed.
+- `messages`: total queued plus unacknowledged messages.
 
-```text
-messages_ready = messages waiting to be consumed
-messages_unacknowledged = messages delivered to a consumer but not ACKed yet
-messages = total messages in the queue
-```
+In the Management UI, open **Queues and Streams**, select a queue, and use **Get messages** with **Nack message requeue true** for inspection that requeues the inspected delivery. Avoid destructive acknowledgment modes when investigating.
 
-## Inspect a message in RabbitMQ UI
+## Message identity and retry metadata
 
-1. Open RabbitMQ Management UI.
-2. Go to **Queues and Streams**.
-3. Open the queue.
-4. Scroll to **Get messages**.
-5. Set **Ack mode** to:
+Published business messages include `message_id`, `correlation_id`, `type`, `timestamp`, `content_type = application/json`, and persistent delivery mode. The body carries stable message, correlation, booking, and performance IDs, customer email, seats, and occurrence time; created events also carry expiration time.
 
-```text
-Nack message requeue true
-```
-
-6. Click **Get Message(s)**.
-
-This lets you inspect the message without removing it.
-
-## Expected RabbitMQ message properties
-
-A published `BookingCreated` message should have:
-
-```text
-message_id
-correlation_id
-type
-timestamp
-content_type = application/json
-delivery_mode = persistent
-```
-
-Expected headers:
-
-```text
-message-id
-correlation-id
-message-type
-```
-
-## Expected retry/DLQ headers
-
-When a message fails and is retried, it should include:
+The publisher also adds `message-id`, `correlation-id`, and `message-type` headers. Retry publication preserves identity and adds:
 
 ```text
 x-retry-count
@@ -148,214 +96,73 @@ x-last-failed-at
 x-last-error
 ```
 
-These headers help explain why a message failed and how many times it was retried.
+Invalid JSON or missing/invalid required event fields is rejected directly to the event's DLQ. Other processing failures currently use delayed retry up to the configured maximum. Broader permanent email/provider failure classification remains Chapter 4 work.
 
 ## Booking outbox
 
-Check latest outbox messages:
+Inspect pending/publication outcomes using the actual outbox column names:
 
-```powershell
-docker exec operahouse-postgres psql -U operahouse -d operahouse -c 'select "MessageId", "CorrelationId", "Type", "RoutingKey", "CreatedAt", "ProcessedAt", "RetryCount", "LastError" from "OutboxMessages" order by "CreatedAt" desc limit 10;'
+```sh
+docker exec operahouse-postgres psql -U operahouse -d operahouse -c 'select "MessageId", "CorrelationId", "Type", "RoutingKey", "OccurredAt", "ProcessedAt", "PublishAttempts", "LastError" from "OutboxMessages" order by "OccurredAt" desc limit 10;'
 ```
 
-Interpretation:
+`ProcessedAt` records successful publication, not consumer completion. A null value means publication is still pending. `LastError` and `PublishAttempts` describe publication failures. A crash after broker acceptance but before saving completion can publish the same message again.
 
-```text
-ProcessedAt has value = message was published
-ProcessedAt is null = message is waiting to be published
-LastError has value = publisher failed
-RetryCount > 0 = publisher had to retry
-```
+## Notification inbox and outcomes
 
-## Notification inbox
-
-Check latest consumed messages:
-
-```powershell
+```sh
 docker exec operahouse-postgres psql -U operahouse -d operahouse -c 'select "MessageId", "Consumer", "Status", "ReceivedAt", "ProcessedAt", "LastError" from notification_inbox_messages order by "ReceivedAt" desc limit 10;'
-```
-
-Interpretation:
-
-```text
-Processed = message was handled successfully
-Failed = processing failed
-Processing = message started processing but did not finish
-```
-
-## Notification messages
-
-Check latest notification records:
-
-```powershell
 docker exec operahouse-postgres psql -U operahouse -d operahouse -c 'select "Recipient", "Subject", "Status", "CreatedAt", "SentAt", "FailedAt", "FailureReason" from notification_messages order by "CreatedAt" desc limit 10;'
 ```
 
-Interpretation:
+Inbox `Processed` means the notification processor recorded completion. `Failed` records a processing failure; `Processing` is the unfinished state. The unique key is `(MessageId, Consumer)`. Keep these persisted consumer identifiers stable:
 
-```text
-Sent = email was sent by the notification sender
-Failed = email sending failed
-Pending = notification was created but not completed
+- Created: `OperaHouse.Notification.Worker`.
+- Expired: `OperaHouse.Notification.BookingExpired`.
+
+Notification `Sent` means SMTP accepted submission. It does not confirm delivery to the recipient's inbox. A successful submission followed by a lost database save may lead to another email on redelivery. Sending and persistence are separate operations.
+
+## Logs and health
+
+The worker logs one readiness summary and one processing outcome per delivery. Retry warnings and exhausted/transport errors retain the original exception and message/correlation context. Queue-declaration, receive, and ACK narration is omitted. Healthy polling is quiet; `HealthLoggingWorker` logs unhealthy dependency entries.
+
+The API exposes `GET /health`. A healthy dependency check means the dependency is reachable; it does not prove consumer progress, empty outboxes, or successful email delivery. Inspect records and queue counts as well.
+
+## Local regression checks
+
+```sh
+dotnet build OperaHouse.sln
+dotnet run --project tests/Regression/OperaHouse.RegressionTests
 ```
 
-## Happy path test
+These checks exercise processing, duplicate, malformed-message, retry/session, and UTC cases with in-process substitutes. They contact no SMTP server and require no running PostgreSQL or broker. SMTP testing is deliberately skipped for the architecture refactor.
 
-1. Start infrastructure:
-
-```powershell
-docker compose up -d
-```
-
-2. Run Booking API.
-3. Run Notification Worker.
-4. Create booking through Swagger:
-
-```text
-POST /bookings
-```
-
-5. Check outbox:
-
-```text
-OutboxMessage should have ProcessedAt set.
-```
-
-6. Check notification inbox:
-
-```text
-Inbox row should be Processed.
-```
-
-7. Check notification messages:
-
-```text
-Notification row should be Sent.
-```
-
-8. RabbitMQ main queue should usually be empty because the worker consumed and ACKed the message.
-
-## Retry/DLQ test
-
-Temporarily force the worker to fail by throwing an exception in the notification processing flow.
-
-Example:
-
-```csharp
-throw new InvalidOperationException("Testing retry metadata.");
-```
-
-Then:
-
-1. Restart Notification Worker.
-2. Create a booking.
-3. Watch worker logs.
-4. Inspect retry queue quickly, or wait until retries are exhausted.
-5. Inspect dead-letter queue.
-
-Expected result:
-
-```text
-Message is retried.
-After max retries, message lands in notification-booking-created.dead-letter.queue.
-DLQ message contains retry headers.
-```
-
-Important: remove the temporary exception after testing.
+Broker/transaction acceptance remains separate. Use dedicated test data and a controlled environment for restart, missing-route, retry, and recovery checks; follow the [Chapter 4 verification steps](CHAPTER-4-IMPLEMENTATION.md). A controlled DLQ replay tool is still pending.
 
 ## Common issues
 
-### Queue is empty after creating booking
+### A queue is empty after creating a booking
 
-This is usually normal.
+This is normal when the consumer has completed and ACKed it. Inspect the outbox, inbox, and notification tables. Confirm the relevant outbox event existed before investigating routing.
 
-If the worker is running and processing succeeds:
+### A delivery remains unacknowledged
 
-```text
-message is consumed
-ACK is sent
-RabbitMQ removes it from the queue
-```
+A handler may be running, paused in a debugger, or waiting on a dependency. The worker restarts a failed session after callback/channel failure; closing the session makes outstanding deliveries recoverable. Check the preceding outcome/session error before restarting anything.
 
-Check the notification inbox and notification messages tables instead.
+### The retry queue looks empty
 
-### Message is unacknowledged
+The default delay is 10,000 ms, so messages may have already returned to their main queue. Inspect retry headers and the event's DLQ after the configured retry maximum.
 
-If `messages_unacknowledged` is greater than zero:
+### Swagger reports “Failed to fetch”
 
-```text
-A consumer received the message but has not ACKed/NACKed it.
-```
+In Development, use [HTTP Swagger](http://localhost:5286/swagger). HTTP requests stay on the same origin instead of redirecting endpoint calls to HTTPS. HTTPS redirection remains enabled outside Development.
 
-Possible causes:
+If using the HTTPS launch URL, trust the local development certificate first:
 
-```text
-Worker is stuck
-Worker is debugging at a breakpoint
-Worker crashed mid-processing
-Long-running handler
-```
-
-Restarting the worker usually returns the message to ready state.
-
-### Retry queue is always empty
-
-This may be normal because retry messages only wait for the configured TTL.
-
-Current retry delay:
-
-```text
-10000 ms
-```
-
-So the message may only stay in the retry queue for 10 seconds before returning to the main queue.
-
-Check the DLQ after max retries.
-
-### Failed to fetch in Swagger
-
-Usually caused by HTTP/HTTPS mismatch or untrusted local dev certificate.
-
-Try opening Swagger with HTTPS:
-
-```text
-https://localhost:7193/swagger
-```
-
-Or trust dev cert:
-
-```powershell
+```sh
 dotnet dev-certs https --trust
 ```
 
 ### RabbitMQ login fails
 
-Check configured credentials.
-
-Expected local credentials:
-
-```text
-operahouse / operahouse
-```
-
-If a local RabbitMQ instance is also running outside Docker, it may conflict with Docker port `5672`.
-
-## Useful health endpoints
-
-Booking API:
-
-```text
-GET /health
-```
-
-Expected:
-
-```text
-Healthy
-```
-
-Worker:
-
-```text
-Health is logged periodically by HealthLoggingWorker.
-```
+Check configured credentials and Docker port bindings. A second local RabbitMQ process can conflict with port `5672`. Use the credentials/environment expected by the running container rather than assuming a different broker instance has the same configuration.

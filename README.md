@@ -11,7 +11,8 @@ The project deliberately uses bare `RabbitMQ.Client` instead of MassTransit so e
 - Retrieve a booking by ID.
 - Save booking data in PostgreSQL through EF Core.
 - Save an outbox message in the same transaction as a booking.
-- Publish `booking.created` through RabbitMQ with publisher confirms.
+- Expire unpaid reservations, release seats, and save a `booking.expired` outbox event.
+- Publish `booking.created` and `booking.expired` through RabbitMQ with publisher confirms.
 - Consume messages using manual ACK and NACK.
 - Retry transient processing failures through a delayed retry queue.
 - Move exhausted messages to a dead-letter queue.
@@ -25,7 +26,7 @@ The project deliberately uses bare `RabbitMQ.Client` instead of MassTransit so e
 
 ```mermaid
 flowchart LR
-    Client["Customer / Swagger"] --> API["Booking API"]
+    Client["Customer / Swagger"] --> API["OperaHouse API"]
     API --> DB[("PostgreSQL")]
     API --> Outbox["Outbox record"]
     Outbox --> Publisher["Outbox publisher"]
@@ -42,47 +43,64 @@ flowchart LR
 
 ## Solution structure
 
+Business code lives in named Booking, Performance, and Notification projects. Each area has a physical parent folder, mirrored by solution folders in the IDE. The API is the single running host for HTTP and background services.
+
 ```text
 src/
-├── OperaHouse.Booking.Api
-├── OperaHouse.Booking.Application
-├── OperaHouse.Booking.Domain
-├── OperaHouse.Booking.Infrastructure
-├── OperaHouse.Notification.Worker
-├── OperaHouse.Notification.Application
-├── OperaHouse.Notification.Domain
-├── OperaHouse.Notification.Infrastructure
-├── OperaHouse.Contracts
-└── OperaHouse.Messaging
+├── Api/
+│   └── OperaHouse.Api/
+│       ├── Controllers/         # BookingsController, PerformancesController
+│       ├── Models/Bookings/    # HTTP request binding
+│       ├── Errors/
+│       └── Security/
+├── Booking/
+│   └── OperaHouse.Booking/
+│       ├── Features/           # CreateBooking, GetBooking, ExpireBookings
+│       ├── Models/
+│       ├── Configuration/
+│       └── Persistence/        # Booking repository contract
+├── Performance/
+│   └── OperaHouse.Performance/
+│       ├── Features/           # Browse, list, get, create, update, publish, cancel
+│       ├── Models/
+│       ├── Shared/             # Shared performance input/validation
+│       └── Persistence/        # Performance repository contract
+├── Notification/
+│   └── OperaHouse.Notification/
+│       ├── Features/           # SendBookingConfirmation, SendBookingExpiration
+│       ├── Processing/
+│       ├── Persistence/
+│       ├── Email/
+│       └── Messaging/
+└── Shared/
+    ├── Persistence/OperaHouse.Persistence/
+    ├── Contracts/OperaHouse.Contracts/
+    └── Messaging/OperaHouse.Messaging/
+tests/
+└── Regression/OperaHouse.RegressionTests/
 ```
 
-### Booking
+| Project | Responsibility |
+| --- | --- |
+| **Api** | Controllers, HTTP error mapping, authorization, configuration, and startup of all background services. |
+| **Booking** | Booking creation/retrieval, reservation expiration, validation, models, and booking persistence contract. |
+| **Performance** | Performance browsing and administration, lifecycle rules, validation, models, and performance persistence contract. |
+| **Notification** | Event consumption, notification features, inbox/outcome persistence, and email submission. |
+| **Persistence** | Shared booking/performance EF context, migrations, concrete repositories, atomic seat/reservation/outbox writes, and outbox publication. |
+| **Contracts** | Integration events and transport-independent application results/errors. |
+| **Messaging** | RabbitMQ publisher, broker options, and broker health check. |
 
-- **API** contains HTTP controllers, request models, Swagger, health endpoint registration, and dependency injection composition.
-- **Application** coordinates booking and performance use cases.
-- **Domain** contains business entities and states.
-- **Infrastructure** contains EF Core persistence, repositories, migrations, and outbox publishing.
+Each use case keeps its handler, input, and validator together under its business project's `Features` folder. The API has one controller for bookings and one for performances. Shared persistence keeps seat allocation and booking state in a single transaction without making either business project depend on the other. Notification retains its own database model.
 
-### Notification
-
-- **Worker** owns the RabbitMQ consumer and process lifetime.
-- **Application** coordinates inbox checks, notification persistence, and email delivery.
-- **Domain** contains inbox and notification records and statuses.
-- **Infrastructure** contains EF Core persistence and the MailKit SMTP adapter.
-
-### Shared projects
-
-- **Contracts** contains integration events shared between publishers and consumers.
-- **Messaging** contains the understandable RabbitMQ publisher, options, and health check.
+See [Architecture](docs/ARCHITECTURE.md) for ownership and transaction boundaries.
 
 ## Technology
 
 - .NET 10
 - ASP.NET Core Web API
-- .NET Worker Service
+- .NET background services hosted by the API
 - Entity Framework Core
 - FluentValidation
-- AutoMapper
 - PostgreSQL 17
 - RabbitMQ 4 with Management UI
 - `RabbitMQ.Client` 7.x
@@ -130,16 +148,18 @@ Booking database:
 
 ```powershell
 dotnet ef database update `
-  --project src/OperaHouse.Booking.Infrastructure `
-  --startup-project src/OperaHouse.Booking.Api
+  --project src/Shared/Persistence/OperaHouse.Persistence `
+  --startup-project src/Api/OperaHouse.Api `
+  --context BookingDbContext
 ```
 
 Notification database:
 
 ```powershell
 dotnet ef database update `
-  --project src/OperaHouse.Notification.Infrastructure `
-  --startup-project src/OperaHouse.Notification.Worker
+  --project src/Notification/OperaHouse.Notification `
+  --startup-project src/Api/OperaHouse.Api `
+  --context NotificationDbContext
 ```
 
 Both contexts currently use the same local PostgreSQL database while retaining separate EF Core models and responsibilities.
@@ -148,35 +168,29 @@ Both contexts currently use the same local PostgreSQL database while retaining s
 
 Never put the Gmail App Password in `appsettings.json` or commit it.
 
-Store the settings in the Notification Worker’s .NET User Secrets:
+Store the settings in the API host’s .NET User Secrets:
 
 ```powershell
-dotnet user-secrets set "Email:Host" "smtp.gmail.com" --project src/OperaHouse.Notification.Worker
-dotnet user-secrets set "Email:Port" "587" --project src/OperaHouse.Notification.Worker
-dotnet user-secrets set "Email:UserName" "your-address@gmail.com" --project src/OperaHouse.Notification.Worker
-dotnet user-secrets set "Email:Password" "YOUR_GOOGLE_APP_PASSWORD" --project src/OperaHouse.Notification.Worker
-dotnet user-secrets set "Email:FromAddress" "your-address@gmail.com" --project src/OperaHouse.Notification.Worker
-dotnet user-secrets set "Email:FromName" "OperaHouse" --project src/OperaHouse.Notification.Worker
-dotnet user-secrets set "Email:UseStartTls" "true" --project src/OperaHouse.Notification.Worker
+dotnet user-secrets set "Email:Host" "smtp.gmail.com" --project src/Api/OperaHouse.Api
+dotnet user-secrets set "Email:Port" "587" --project src/Api/OperaHouse.Api
+dotnet user-secrets set "Email:UserName" "your-address@gmail.com" --project src/Api/OperaHouse.Api
+dotnet user-secrets set "Email:Password" "YOUR_GOOGLE_APP_PASSWORD" --project src/Api/OperaHouse.Api
+dotnet user-secrets set "Email:FromAddress" "your-address@gmail.com" --project src/Api/OperaHouse.Api
+dotnet user-secrets set "Email:FromName" "OperaHouse" --project src/Api/OperaHouse.Api
+dotnet user-secrets set "Email:UseStartTls" "true" --project src/Api/OperaHouse.Api
 ```
 
-Use a Google App Password, not the normal Gmail account password.
+Use a Google App Password, not the normal Gmail account password. In Development, the host also reads the existing Notification project secrets, so the move preserves earlier local email settings. API secrets take precedence; environment variables and command-line settings override both.
 
-### 5. Run the applications
+### 5. Run the application
 
-Run the Booking API:
+Run the API host; it also starts notification consumption, booking expiration, outbox publication, and dependency health logging:
 
 ```powershell
-dotnet run --project src/OperaHouse.Booking.Api
+dotnet run --project src/Api/OperaHouse.Api
 ```
 
-Run the Notification Worker in another terminal:
-
-```powershell
-dotnet run --project src/OperaHouse.Notification.Worker
-```
-
-Open the Booking API URL shown in its console and append `/swagger` to use Swagger UI.
+Open [HTTP Swagger](http://localhost:5286/swagger). In Development, HTTP requests stay on HTTP; outside Development the host redirects them to HTTPS. The HTTPS launch profile is also available when the local development certificate is trusted.
 
 ## API endpoints
 
@@ -185,26 +199,32 @@ Open the Booking API URL shown in its console and append `/swagger` to use Swagg
 | `GET` | `/performances` | List customer-visible performances |
 | `POST` | `/bookings` | Create a pending guest booking |
 | `GET` | `/bookings/{id}` | Retrieve a booking |
-| `GET` | `/health` | Check Booking API dependencies |
+| `GET` | `/health` | Check API dependencies |
 
 ## RabbitMQ topology
 
 | Purpose | Name |
 | --- | --- |
 | Events exchange | `operahouse.events` |
-| Booking routing key | `booking.created` |
-| Notification queue | `notification-booking-created.queue` |
+| Booking-created routing key | `booking.created` |
+| Booking-expired routing key | `booking.expired` |
+| Created notification queue | `notification-booking-created.queue` |
+| Expired notification queue | `notification-booking-expired.queue` |
 | Retry exchange | `operahouse.retry` |
-| Retry queue | `notification-booking-created.retry.queue` |
+| Created retry queue | `notification-booking-created.retry.queue` |
+| Expired retry queue | `notification-booking-expired.retry.queue` |
 | Dead-letter exchange | `operahouse.dead-letter` |
-| Dead-letter queue | `notification-booking-created.dead-letter.queue` |
+| Created dead-letter queue | `notification-booking-created.dead-letter.queue` |
+| Expired dead-letter queue | `notification-booking-expired.dead-letter.queue` |
 
 All important exchanges and queues are durable. Published business messages are persistent, and the consumer uses manual acknowledgements.
 
 ## Documentation
 
+- [Architecture](docs/ARCHITECTURE.md)
 - [Development roadmap](docs/ROADMAP.md)
 - [Messaging debugging runbook](docs/messaging-debugging.md)
+- [Regression checks](tests/README.md)
 - [Project collaboration rules](PROJECT_RULES.md)
 - Additional design and use-case documents are available in the `docs` directory.
 
@@ -213,5 +233,3 @@ See the [roadmap](docs/ROADMAP.md) for the current reservation work, an early Az
 ## Important production note
 
 Gmail SMTP is the current local email integration. Postmark is the preferred production email provider; its integration is planned for the first Azure deployment chapter. The existing `IEmailSender` boundary keeps provider details out of the application workflow.
-
-AutoMapper 16 is dual-licensed. Configure `AUTOMAPPER_LICENSE_KEY` in commercial production environments when required; never commit the license key to the repository.

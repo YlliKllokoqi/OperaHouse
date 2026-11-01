@@ -8,7 +8,7 @@ The intended customer journey is:
 
 We will build and deploy this journey a chapter at a time. The first Azure deployment happens after reservations and expiration work locally. Later features bring their infrastructure, tests, security, and diagnostics with them. The final chapter prepares an already deployed system for production operation.
 
-Last reviewed: **30 October 2026**. Status is based on repository inspection; local execution, database migration history, and cloud deployment have not been verified in this review.
+Last reviewed: **1 November 2026**. Status distinguishes source implementation from infrastructure verification. The vertical-slice consolidation retains the existing database schema and migration history; local database/broker execution and cloud deployment still require separate verification.
 
 ## Start here
 
@@ -17,7 +17,7 @@ Last reviewed: **30 October 2026**. Status is based on repository inspection; lo
 | 1. Booking and basic messaging | Create a booking and tell the notification worker about it. | Foundation implemented. |
 | 2. Reliable messaging and email | Persist messages, retry failures, recognize completed processing, and send email. | Most foundation code exists; verification and reliability gaps remain. |
 | 3. Performance administration | Let authorized administrators manage performances. | Main use cases implemented; lifecycle and database verification remain. |
-| 4. Complete reservations and expiration | Reserve seats safely, release them correctly, and notify the customer. | **Current chapter.** Expiration consumer wiring is the immediate next task. |
+| 4. Complete reservations and expiration | Reserve seats safely, release them correctly, and notify the customer. | **Current chapter.** Created/expired consumers are implemented; failure classification, unpaid cancellation, and infrastructure verification remain. |
 | 5. First Azure deployment | Run the reservation flow in a small Azure environment using Terraform and Postmark. | Planned, before payments. |
 | 6. Payments | Confirm a reservation after a verified payment. | Planned; deploy with the feature. |
 | 7. Tickets and document storage | Issue downloadable tickets for confirmed bookings. | Planned; add Blob Storage here. |
@@ -26,7 +26,7 @@ Last reviewed: **30 October 2026**. Status is based on repository inspection; lo
 | 10. Customer access and notification experience | Add customer accounts and improve the complete communication journey. | Planned; guest access is secured earlier. |
 | 11. Production readiness | Prove recovery, scaling, security, and operational procedures. | Planned; builds on checks introduced throughout. |
 
-**Next small task:** connect `booking.expired` deliveries in the Notification Worker to the existing expiration notification service. Complete Chapter 4 before starting the first Azure deployment.
+**Next small task:** classify permanent versus transient email failures, then finish unpaid cancellation and the PostgreSQL/RabbitMQ verification work. Complete Chapter 4 before starting the first Azure deployment.
 
 ## How to use this roadmap
 
@@ -39,9 +39,11 @@ Last reviewed: **30 October 2026**. Status is based on repository inspection; lo
 
 The collaboration rules remain in [`PROJECT_RULES.md`](../PROJECT_RULES.md).
 
-## Architecture we are working toward
+## Architecture
 
-Start with three application deployments and keep business modules in the existing solution unless a separate deployment has a clear purpose.
+The current solution has named Booking, Performance, and Notification business projects, a single API host, and shared Persistence, Contracts, and Messaging projects. Physical area folders wrap every project and are mirrored in the solution. Business use cases keep their handlers, inputs, and validators together; the API has one controller per resource. Shared persistence preserves the atomic seat/reservation/outbox transactions.
+
+See [Architecture](ARCHITECTURE.md) for responsibilities. The API host starts notification consumption, outbox publication, expiration, and health logging. The diagram below is a later Azure deployment target; independent worker hosts would be introduced at that stage.
 
 ```mermaid
 flowchart TD
@@ -75,7 +77,7 @@ Across these applications: **Entra** handles staff/customer identity, **managed 
 | --- | --- | --- |
 | OperaHouse API | Customer requests, admin endpoints, payment callbacks, and protected provider callbacks. | Azure Container Apps. |
 | Booking Worker | Publish the Booking outbox and expire unpaid reservations independently of HTTP traffic. | Azure Container Apps; a new worker host is still needed. |
-| Notification Worker | Consume business events, persist notification outcomes, and send emails. | Azure Container Apps. |
+| Notification Worker | Consume business events, persist notification outcomes, and send emails. | Azure Container Apps; a separate host would be introduced when splitting deployment. |
 | Ticket and invoice processing | Generate documents and publish the corresponding business events. | Add to an appropriate worker when introduced; split only when justified. |
 | Business database | Performances, reservations, payments, and related processing records. | Azure Database for PostgreSQL Flexible Server. Initially one server, with explicit data ownership and restricted database permissions. |
 | Message broker | Durable exchanges, queues, retries, and dead-letter handling. | Managed RabbitMQ; CloudAMQP in an Azure region is a candidate, subject to plan and cost selection. |
@@ -96,7 +98,7 @@ Keycloak remains an alternative if operating an identity platform becomes an exp
 ## Working principles
 
 - Keep the code readable. Use standard patterns where they solve a real problem, and avoid speculative abstractions or a new microservice for every feature.
-- Keep business rules in Application and Domain code. Put provider integrations in Infrastructure and choose them through startup registration and configuration.
+- Keep use-case inputs, validation, and orchestration in their feature slices. Keep shared business rules in module entities; keep provider integrations in their owning module and choose them through startup registration and configuration.
 - Keep the same application behavior across local and Azure environments. External endpoints, credentials, and telemetry destinations come from configuration.
 - Add tests for important business rules and failure cases as each feature is built. Extend the same deployment pipeline as the system grows.
 - Introduce authentication, authorization, input protection, secret management, and observability alongside the endpoints and integrations that need them.
@@ -108,7 +110,7 @@ Keycloak remains an alternative if operating an identity platform becomes an exp
 
 **Outcome:** a customer can create a pending guest booking, and a background consumer receives a `booking.created` event.
 
-- [x] Create the .NET 10 solution and separate Booking into API, Application, Domain, and Infrastructure projects.
+- [x] Create the .NET 10 solution; group use cases into named Booking and Performance projects, with resource controllers in the API and physical folders around each project.
 - [x] Add PostgreSQL, EF Core, migrations, and `Performance` and `Booking` models.
 - [x] Add `GET /performances`, `POST /bookings`, and `GET /bookings/{id}`.
 - [x] Define `BookingCreated` and publish it to a durable topic exchange.
@@ -131,7 +133,7 @@ Keycloak remains an alternative if operating an identity platform becomes an exp
 - [x] Limit retries and retain failure metadata.
 - [x] Persist inbox records with a unique `(MessageId, Consumer)` constraint.
 - [x] Skip messages already recorded as processed and persist notification results separately.
-- [x] Separate Notification into Worker, Application, Domain, and Infrastructure projects.
+- [x] Keep notification features, inbox/send/outcome processing, persistence, email integration, and broker handling in the Notification project, hosted by the API.
 - [x] Keep email delivery behind `IEmailSender` and implement MailKit SMTP delivery.
 - [x] Add validated email options and document local Gmail User Secrets configuration.
 - [x] Propagate message/correlation IDs and add logging scopes, health checks, and a health logging worker.
@@ -148,7 +150,7 @@ Keycloak remains an alternative if operating an identity platform becomes an exp
 - [x] Show customers only published future performances.
 - [x] Prevent reservations for unavailable performance states or past performances.
 - [x] Add admin create, update, publish, cancel, and list operations.
-- [x] Keep management endpoints in the API's `Admin` area and reuse existing Application/Domain code.
+- [x] Keep management actions on the API's Performances controller, require the Admin policy, and call the Performance slice handlers.
 - [x] Add JWT bearer authentication, development tokens, and an administrator policy.
 - [x] Keep public browsing and guest booking available without customer registration.
 - [~] Verify the administration migration and complete lifecycle against a running database.
@@ -159,7 +161,7 @@ Keycloak remains an alternative if operating an identity platform becomes an exp
 
 **Outcome:** reservations hold only available seats, unpaid reservations release their seats correctly, and customers can receive expiration notifications.
 
-The [file-by-file implementation guide](CHAPTER-4-IMPLEMENTATION.md) contains the proposed code, tests, and verification commands for the remaining work. It is a draft to apply; it does not change the implementation status below.
+The [remaining-work guide](CHAPTER-4-IMPLEMENTATION.md) records the next slices and verification steps. It links current source instead of providing full-file replacements for the superseded layered architecture.
 
 This is the current chapter. Reservation state definitions exist, but confirmed and cancelled behavior must not be inferred from enum values alone. Payment-driven confirmation belongs to Chapter 6.
 
@@ -178,11 +180,12 @@ This is the current chapter. Reservation state definitions exist, but confirmed 
 - [x] Define a self-contained `BookingExpired` event with customer email and reservation details.
 - [x] Route expiration outbox messages through the persistent, confirmed publisher using `booking.expired`.
 - [x] Declare durable expiration notification, retry, and dead-letter queues and bindings.
-- [x] Implement an expiration notification service using inbox checks, notification persistence, and `IEmailSender`.
-- [ ] Add the missing expiration consumer and call `ProcessBookingExpiredAsync`.
-- [ ] Add manual ACK/NACK, correlation-aware logging, and expiration-specific retry routing.
-- [ ] Classify transient and permanent failures for both notification event types; send permanent failures to the DLQ without pointless retries.
-- [ ] Confirm successful retry publication before ACKing the original delivery. Verify publish failures leave the original recoverable.
+- [x] Implement the expiration notification slice using shared inbox/outcome processing and `IEmailSender`.
+- [x] Consume expiration events through the expiration notification slice.
+- [x] Use manual ACK/NACK, contextual outcome logging, and expiration-specific retry routing.
+- [~] Reject malformed JSON and invalid event fields directly to the DLQ. Classify permanent versus transient email/provider failures for both event types.
+- [x] Confirm retry publication before ACKing the original delivery; surface callback/channel failures to the session reconnect loop.
+- [ ] Verify failed retry publication and original-message recovery against a running broker.
 - [ ] Add a documented, controlled way to inspect and replay DLQ messages while preserving message identity.
 - [ ] Verify topology is present before publishing and that unroutable events remain recoverable through the outbox.
 
@@ -195,7 +198,8 @@ This is the current chapter. Reservation state definitions exist, but confirmed 
 
 ### 4.4 Local verification and meaningful tests
 
-- [ ] Establish Domain/Application unit tests for business rules and an integration-test setup for PostgreSQL and RabbitMQ.
+- [x] Add a local regression runner for notification outcomes, invalid payloads, duplicate processing, retry/session handling, and UTC dates using in-process substitutes.
+- [ ] Extend business-rule coverage and add a PostgreSQL/RabbitMQ integration-test setup.
 - [ ] Apply existing migrations to a fresh database and verify an upgrade from the previous schema.
 - [ ] Verify the admin lifecycle and create/get reservation flow against running services.
 - [ ] Test concurrent requests for the last seats, repeated idempotency keys, and conflicting reuse of a key.
@@ -203,7 +207,9 @@ This is the current chapter. Reservation state definitions exist, but confirmed 
 - [ ] Verify one logical outbox event per committed transition while allowing repeated publication/delivery after failures.
 - [ ] Test completed-message duplicates, delayed retries, exhausted retries, permanent failures, and recovery after broker/worker restarts.
 - [ ] Demonstrate a real booking email and expiration email to a controlled test recipient.
-- [ ] Record the email send-before-database-save failure window: inbox tracking alone cannot guarantee exactly-once email delivery.
+- [x] Document the email send-before-database-save failure window: inbox tracking alone cannot guarantee exactly-once email delivery.
+
+SMTP tests are excluded from the current architecture refactor at the user's request. The controlled-recipient demonstration above remains a separate future acceptance check.
 
 **Chapter complete when:** the local booking → reservation → expiration/cancellation → seat release → notification flow is demonstrated, and the important concurrency and messaging failure cases have repeatable checks.
 
@@ -215,7 +221,7 @@ Work through these sections in small steps. This chapter establishes the deploym
 
 ### 5.1 Package and host the existing application
 
-- [ ] Create a Booking Worker host for the existing outbox publisher and expiration tasks; remove their hosted registrations from the API when the separate host is enabled.
+- [ ] Introduce independent worker hosts for Notification and booking background jobs when splitting deployment; reuse the existing libraries and remove the corresponding hosted registrations from the API.
 - [ ] Add container packaging for the API, Booking Worker, and Notification Worker, and run the images locally.
 - [ ] Keep endpoints, provider choices, credentials, and environment settings in validated configuration.
 - [ ] Add TLS and certificate validation for managed RabbitMQ and PostgreSQL connections.

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions" Version="10.0.9" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../Booking/OperaHouse.Booking/OperaHouse.Booking.csproj" />
+    <ProjectReference Include="../../../Performance/OperaHouse.Performance/OperaHouse.Performance.csproj" />
+    <ProjectReference Include="../../Messaging/OperaHouse.Messaging/OperaHouse.Messaging.csproj" />
+  </ItemGroup>
+</Project>
