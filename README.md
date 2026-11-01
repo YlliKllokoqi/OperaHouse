@@ -107,7 +107,7 @@ From the repository root:
 docker compose up -d
 ```
 
-PostgreSQL is exposed on host port `54320`. RabbitMQ uses `5672`, and its Management UI is available at [http://localhost:15672](http://localhost:15672).
+PostgreSQL is exposed on host port `54400`. RabbitMQ uses `5672`, and its Management UI is available at [http://localhost:15672](http://localhost:15672).
 
 Local RabbitMQ credentials are defined in `docker-compose.yml`.
 
@@ -208,10 +208,10 @@ All important exchanges and queues are durable. Published business messages are 
 - [Project collaboration rules](PROJECT_RULES.md)
 - Additional design and use-case documents are available in the `docs` directory.
 
-See the [roadmap](docs/ROADMAP.md) for payments, ticketing, invoicing, observability, testing, security, and Azure deployment plans.
+See the [roadmap](docs/ROADMAP.md) for the current reservation work, an early Azure deployment with Terraform, and the later payment, ticketing, invoicing, and production-readiness chapters. Tests, security, telemetry, and infrastructure changes are introduced alongside each feature.
 
 ## Important production note
 
-Gmail SMTP is suitable for local development and portfolio demonstrations, but it is not the intended production email platform. The production Azure deployment is planned to use Azure Communication Services Email while retaining `IEmailSender` so application logic does not depend on a specific provider.
+Gmail SMTP is the current local email integration. Postmark is the preferred production email provider; its integration is planned for the first Azure deployment chapter. The existing `IEmailSender` boundary keeps provider details out of the application workflow.
 
 AutoMapper 16 is dual-licensed. Configure `AUTOMAPPER_LICENSE_KEY` in commercial production environments when required; never commit the license key to the repository.

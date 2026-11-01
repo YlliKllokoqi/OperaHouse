@@ -15,19 +15,67 @@ public class Worker(ILogger<Worker> logger,
     : BackgroundService
 {
     private readonly RabbitMqOptions _options = options.Value;
-    
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await RunSessionAsync(stoppingToken);
+            }
+            catch (Exception OperationCanceledException)
+                when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch(Exception ex)
+            {
+                logger.LogError(
+                    ex,
+                    "Notification RabbitMQ session failed. Reconnecting in five seconds.");
+            }
+
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+            }
+            catch (OperationCanceledException e)
+                when(stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+        }
+    }
+
+    protected async Task RunSessionAsync(CancellationToken hostStoppingToken)
+    {
+        using var sessionCancellation = 
+            CancellationTokenSource.CreateLinkedTokenSource(hostStoppingToken);
+        
+        var stoppingToken = sessionCancellation.Token;
+        
         var factory = new ConnectionFactory
         {
             HostName = _options.HostName,
             Port = _options.Port,
             UserName = _options.UserName,
-            Password = _options.Password
+            Password = _options.Password,
+            ConsumerDispatchConcurrency = 1,
+            AutomaticRecoveryEnabled = true
         };
 
         await using var connection = await factory.CreateConnectionAsync(stoppingToken);
         await using var channel = await connection.CreateChannelAsync(cancellationToken: stoppingToken);
+
+        var retryChannelOptions = new CreateChannelOptions(
+            publisherConfirmationsEnabled: true,
+            publisherConfirmationTrackingEnabled: true);
+
+        await using var retryChannel =
+            await connection.CreateChannelAsync(
+                retryChannelOptions,
+                cancellationToken: stoppingToken);
 
         logger.LogInformation(
             "Declaring RabbitMQ exchange {ExchangeName}",
@@ -212,10 +260,10 @@ public class Worker(ILogger<Worker> logger,
                 
                 await using var scope = serviceScopeFactory.CreateAsyncScope();
 
-                var notificationProcessor = scope.ServiceProvider
-                    .GetRequiredService<INotificationProcessor>();
+                var notificationService = scope.ServiceProvider
+                    .GetRequiredService<INotificationService>();
 
-                var result = await notificationProcessor.ProcessBookingCreatedAsync(
+                var result = await notificationService.ProcessBookingCreatedAsync(
                     message,
                     stoppingToken);
                 
@@ -241,10 +289,11 @@ public class Worker(ILogger<Worker> logger,
                 if (retryCount < _options.BookingCreatedMaxRetryAttempts)
                 {
                     await PublishToRetryExchangeAsync(
-                        channel,
+                        retryChannel,
                         eventArgs,
                         e,
                         retryCount: retryCount + 1,
+                        retryRoutingkey: _options.BookingCreatedRetryRoutingKey,
                         stoppingToken);
                     
                     logger.LogWarning(
@@ -281,8 +330,112 @@ public class Worker(ILogger<Worker> logger,
         logger.LogInformation(
             "Notification worker is consuming queue {QueueName}",
             _options.BookingCreatedQueueName);
+        
+        var expiredConsumer = new AsyncEventingBasicConsumer(channel);
+        
+        expiredConsumer.ReceivedAsync += (_, eventArgs) =>
+            HandleBookingExpiredAsync(
+                channel,
+                retryChannel,
+                eventArgs,
+                stoppingToken);
+
+        await channel.BasicConsumeAsync(
+            queue: _options.BookingExpiredQueueName,
+            autoAck: false,
+            consumer: expiredConsumer,
+            cancellationToken: stoppingToken);
+        
+        logger.LogInformation(
+            "Notification worker is consuming queue {QueueName}.",
+            _options.BookingExpiredQueueName);
 
         await Task.Delay(Timeout.Infinite, stoppingToken);
+    }
+
+    public async Task HandleBookingExpiredAsync(
+        IChannel channel,
+        IChannel retryChannel,
+        BasicDeliverEventArgs eventArgs,
+        CancellationToken cancellationToken)
+    {
+        using var loggingScope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["MessageId"] = eventArgs.BasicProperties.MessageId,
+            ["CorrelationId"] = eventArgs.BasicProperties.CorrelationId,
+            ["RoutingKey"] = eventArgs.RoutingKey
+        });
+
+        try
+        {
+            var body = eventArgs.Body.ToArray();
+            var json = Encoding.UTF8.GetString(body);
+            var message = JsonSerializer.Deserialize<BookingExpired>(json);
+
+            logger.LogInformation("Received BookingExpired message {BookingId}.",
+                message.BookingId);
+
+            await using var scope = serviceScopeFactory.CreateAsyncScope();
+
+            var notificationService = scope.ServiceProvider
+                .GetRequiredService<INotificationService>();
+
+            var result = await notificationService.ProcessBookingExpiredAsync(
+                message,
+                cancellationToken);
+
+            logger.LogInformation("Expiration notification processing result: {Result}",
+                result);
+
+            await channel.BasicAckAsync(
+                deliveryTag: eventArgs.DeliveryTag,
+                multiple: false,
+                cancellationToken: cancellationToken);
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            //Leave the delivery unacknowledged.
+        }
+        catch(Exception e)
+        {
+            logger.LogError(
+                e,
+                "Failed to process BookingExpired message.");
+            
+            var retryCount = GetRetryCount(eventArgs.BasicProperties);
+
+            if (retryCount < _options.BookingExpiredMaxRetryAttempts)
+            {
+                await PublishToRetryExchangeAsync(
+                    retryChannel,
+                    eventArgs,
+                    e,
+                    retryCount: retryCount + 1,
+                    retryRoutingkey: _options.BookingExpiredRetryRoutingKey,
+                    cancellationToken);
+
+                await channel.BasicAckAsync(
+                    deliveryTag: eventArgs.DeliveryTag,
+                    multiple: false,
+                    cancellationToken);
+                
+                logger.LogWarning("BookignExpired sent for retry {RetryCount}.",
+                    retryCount + 1);
+
+                return;
+            }
+
+            await channel.BasicNackAsync(
+                deliveryTag: eventArgs.DeliveryTag,
+                multiple: false,
+                requeue: false,
+                cancellationToken);
+            
+            logger.LogWarning(
+                "BookingExpired exhausted its retries and was rejected "
+                + "to the configured dead-letter route.");
+        }
     }
 
     private async Task PublishToRetryExchangeAsync(
@@ -290,6 +443,7 @@ public class Worker(ILogger<Worker> logger,
         BasicDeliverEventArgs eventArgs,
         Exception exception,
         int retryCount,
+        string retryRoutingkey,
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow.ToString("O");
@@ -314,13 +468,18 @@ public class Worker(ILogger<Worker> logger,
             Headers = headers
         };
 
+        using var publishTimeout =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        
+        publishTimeout.CancelAfter(TimeSpan.FromSeconds(15));
+        
         await channel.BasicPublishAsync(
             exchange: _options.RetryExchangeName,
-            routingKey: _options.BookingCreatedRetryRoutingKey,
-            mandatory: false,
+            routingKey: retryRoutingkey,
+            mandatory: true,
             basicProperties: retryProperties,
             body: eventArgs.Body,
-            cancellationToken: cancellationToken);
+            cancellationToken: publishTimeout.Token);
     }
 
     private async Task DeclareBookingExpiredTopologyAsync(

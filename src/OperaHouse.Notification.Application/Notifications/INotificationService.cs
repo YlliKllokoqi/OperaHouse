@@ -2,7 +2,7 @@ using OperaHouse.Contracts.Events;
 
 namespace OperaHouse.Notification.Application.Notifications;
 
-public interface INotificationProcessor
+public interface INotificationService
 {
     Task<NotificationProcessingResult> ProcessBookingCreatedAsync(
         BookingCreated message,

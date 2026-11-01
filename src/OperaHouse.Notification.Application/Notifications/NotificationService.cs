@@ -6,13 +6,13 @@ using OperaHouse.Notification.Domain.Notifications;
 
 namespace OperaHouse.Notification.Application.Notifications;
 
-public sealed class NotificationProcessor(
+public sealed class NotificationService(
     IInboxRepository inboxRepository,
     INotificationRepository notificationRepository,
     IEmailSender emailSender,
     INotificationUnitOfWork unitOfWork,
-    ILogger<NotificationProcessor> logger)
-    : INotificationProcessor
+    ILogger<NotificationService> logger)
+    : INotificationService
 {
     private const string BookingCreatedConsumerName = "OperaHouse.Notification.Worker";
     private const string BookingExpiredConsumerName = "OperaHouse.Notification.BookingExpired";

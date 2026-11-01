@@ -47,7 +47,7 @@ builder.Services.AddScoped<IInboxRepository, InboxRepository>();
 builder.Services.AddScoped<INotificationRepository, NotificationRepository>();
 builder.Services.AddScoped<INotificationUnitOfWork, NotificationUnitOfWork>();
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
-builder.Services.AddScoped<INotificationProcessor, NotificationProcessor>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddHealthChecks()
     .AddCheck<NotificationDatabaseHealthCheck>("notification-database")
     .AddCheck<RabbitMqHealthCheck>("rabbitmq");
