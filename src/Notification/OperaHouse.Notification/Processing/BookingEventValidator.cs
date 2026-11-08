@@ -21,6 +21,10 @@ internal static class BookingEventValidator
         Validate(message.MessageId, message.CorrelationId, message.BookingId,
             message.PerformanceId, message.CustomerEmail, message.Seats, message.OccurredAt);
 
+    public static void Validate(BookingCancelled message) =>
+        Validate(message.MessageId, message.CorrelationId, message.BookingId,
+            message.PerformanceId, message.CustomerEmail, message.Seats, message.OccurredAt);
+
     private static void Validate(Guid messageId, Guid correlationId, Guid bookingId,
         Guid performanceId, string? customerEmail, int seats, DateTimeOffset occurredAt)
     {

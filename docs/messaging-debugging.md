@@ -1,11 +1,11 @@
 # Messaging debugging runbook
 
-Use this guide to inspect the implemented created/expired event flow. The [architecture guide](ARCHITECTURE.md) explains ownership; the [Chapter 4 guide](CHAPTER-4-IMPLEMENTATION.md) records pending cancellation, failure-classification, replay, and infrastructure checks.
+Use this guide to inspect booking creation, expiration, and cancellation events. See the [architecture guide](ARCHITECTURE.md) for ownership and the [Chapter 4 guide](CHAPTER-4-IMPLEMENTATION.md) for implementation and verification steps.
 
 ## Expected flow
 
 ```text
-Booking creation / expiration
+Booking creation / expiration / cancellation
   → booking state + seat update + outbox committed together
   → OutboxPublisherWorker publishes with stable message ID and confirms
   → RabbitMQ routes to the event's notification queue
@@ -63,11 +63,15 @@ The API host runs the Notification consumer, outbox publisher, reservation expir
 | Expired route | `booking.expired` |
 | Expired retry route | `booking.expired.retry` |
 | Expired dead-letter route | `booking.expired.dead` |
+| Cancelled route | `booking.cancelled` |
+| Cancelled retry route | `booking.cancelled.retry` |
+| Cancelled dead-letter route | `booking.cancelled.dead` |
 
 | Event | Main queue | Retry queue | Dead-letter queue |
 | --- | --- | --- | --- |
 | Created | `notification-booking-created.queue` | `notification-booking-created.retry.queue` | `notification-booking-created.dead-letter.queue` |
 | Expired | `notification-booking-expired.queue` | `notification-booking-expired.retry.queue` | `notification-booking-expired.dead-letter.queue` |
+| Cancelled | `notification-booking-cancelled.queue` | `notification-booking-cancelled.retry.queue` | `notification-booking-cancelled.dead-letter.queue` |
 
 Inspect queue counts:
 
@@ -119,6 +123,7 @@ Inbox `Processed` means the notification processor recorded completion. `Failed`
 
 - Created: `OperaHouse.Notification.Worker`.
 - Expired: `OperaHouse.Notification.BookingExpired`.
+- Cancelled: `OperaHouse.Notification.BookingCancelled`.
 
 Notification `Sent` means SMTP accepted submission. It does not confirm delivery to the recipient's inbox. A successful submission followed by a lost database save may lead to another email on redelivery. Sending and persistence are separate operations.
 

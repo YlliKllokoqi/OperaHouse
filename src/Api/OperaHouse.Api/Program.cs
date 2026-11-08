@@ -85,6 +85,7 @@ builder.Services.AddValidatorsFromAssemblyContaining<Bookings.CreateBooking.Crea
 builder.Services.AddValidatorsFromAssemblyContaining<PerformanceDetailsInputValidator>();
 builder.Services.AddScoped<Bookings.CreateBooking.Handler>();
 builder.Services.AddScoped<Bookings.GetBooking.Handler>();
+builder.Services.AddScoped<Bookings.CancelBooking.Handler>();
 builder.Services.AddScoped<Bookings.ExpireBookings.Handler>();
 builder.Services.AddScoped<IBookingRepository, BookingRepository>();
 builder.Services.AddScoped<IPerformanceRepository, PerformanceRepository>();
@@ -139,6 +140,7 @@ builder.Services.AddScoped<INotificationStore, NotificationStore>();
 builder.Services.AddScoped<NotificationProcessor>();
 builder.Services.AddScoped<SendBookingConfirmation>();
 builder.Services.AddScoped<SendBookingExpiration>();
+builder.Services.AddScoped<SendBookingCancellation>();
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddHostedService<HealthLoggingWorker>();
 

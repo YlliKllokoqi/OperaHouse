@@ -88,8 +88,14 @@ public class Worker(ILogger<Worker> logger,
         await channel.BasicConsumeAsync(queue: _options.BookingExpiredQueueName, autoAck: false,
             consumer: expiredConsumer, cancellationToken: stoppingToken);
 
-        logger.LogInformation("Notification consumers ready: {CreatedQueue}, {ExpiredQueue}.",
-            _options.BookingCreatedQueueName, _options.BookingExpiredQueueName);
+        var cancelledConsumer = new AsyncEventingBasicConsumer(channel);
+        cancelledConsumer.ReceivedAsync += (_, delivery) =>
+            _deliveries.HandleBookingCancelledAsync(channel, retryChannel, delivery, stoppingToken);
+        await channel.BasicConsumeAsync(queue: _options.BookingCancelledQueueName, autoAck: false,
+            consumer: cancelledConsumer, cancellationToken: stoppingToken);
+
+        logger.LogInformation("Notification consumers ready: {CreatedQueue}, {ExpiredQueue}, {CancelledQueue}.",
+            _options.BookingCreatedQueueName, _options.BookingExpiredQueueName, _options.BookingCancelledQueueName);
 
         // Callback failures run outside this task; surface them to the reconnect loop.
         throw await sessionFailure.Task.WaitAsync(hostStoppingToken);

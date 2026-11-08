@@ -13,4 +13,6 @@ public interface IBookingRepository
         int batchSize, CancellationToken cancellationToken);
     Task<bool> TryExpireAsync(ExpiringBooking booking, BookingExpired message,
         DateTimeOffset currentTime, CancellationToken cancellationToken);
+    Task<BookingCancellationPersistenceResult> TryCancelAsync(Guid id, DateTimeOffset currentTime,
+        CancellationToken cancellationToken);
 }

@@ -2,6 +2,13 @@ using PerformanceEntity = OperaHouse.Performance.Models.Performance;
 using OperaHouse.Performance.Models;
 using OperaHouse.RegressionTests;
 
+if (args is ["--cancellation-db"])
+{
+    await CancellationDatabaseTests.RunAsync();
+    Console.WriteLine($"All {Check.Passed} cancellation database checks passed.");
+    return;
+}
+
 await NotificationTests.RunAsync();
 await WorkerTests.RunAsync();
 

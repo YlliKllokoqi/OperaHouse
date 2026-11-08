@@ -163,27 +163,7 @@ public sealed class BookingRepository(
             return false;
         }
 
-        var releasedPerformanceRows =
-            await dbContext.Performances
-                .Where(performance =>
-                    performance.Id == booking.PerformanceId
-                    && performance.AvailableSeats
-                    + booking.Seats
-                    <= performance.Capacity)
-                .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(
-                        performance =>
-                            performance.AvailableSeats,
-                        performance =>
-                            performance.AvailableSeats + booking.Seats)
-                    .SetProperty(
-                        performance => performance.UpdatedAt,
-                        currentTime), cancellationToken);
-
-        if (releasedPerformanceRows != 1)
-        {
-            throw new InvalidOperationException($"Could not release seats for booking {booking.BookingId}");
-        }
+        await ReleaseSeatsAsync(booking.BookingId, booking.PerformanceId, booking.Seats, currentTime, cancellationToken);
 
         await dbContext.OutboxMessages.AddAsync(
             CreateOutboxMessage(
@@ -199,6 +179,73 @@ public sealed class BookingRepository(
         await transaction.CommitAsync(cancellationToken);
 
         return true;
+    }
+
+    public async Task<BookingCancellationPersistenceResult> TryCancelAsync(Guid id, DateTimeOffset currentTime,
+        CancellationToken cancellationToken)
+    {
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        var updatedRows = await dbContext.Bookings
+            .Where(booking => booking.Id == id
+                && booking.Status == BookingStatus.Pending
+                && booking.ExpiresAt > currentTime)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(booking => booking.Status, BookingStatus.Cancelled)
+                .SetProperty(booking => booking.CancelledAt, currentTime), cancellationToken);
+
+        var booking = await GetByIdAsync(id, cancellationToken);
+        if (updatedRows == 0)
+        {
+            return booking switch
+            {
+                null => new(BookingCancellationOutcome.NotFound),
+                { Status: BookingStatus.Cancelled } => new(BookingCancellationOutcome.Cancelled, booking),
+                _ => new(BookingCancellationOutcome.Ineligible)
+            };
+        }
+
+        if (booking is null)
+        {
+            throw new InvalidOperationException($"Booking {id} disappeared during cancellation.");
+        }
+
+        await ReleaseSeatsAsync(id, booking.PerformanceId, booking.Seats, currentTime, cancellationToken);
+
+        var message = new BookingCancelled(Guid.NewGuid(), Guid.NewGuid(), id, booking.PerformanceId,
+            booking.CustomerEmail, booking.Seats, currentTime);
+        await dbContext.OutboxMessages.AddAsync(
+            CreateOutboxMessage(message.MessageId, message.CorrelationId, nameof(BookingCancelled),
+                _rabbitMqOptions.BookingCancelledRoutingKey, message.OccurredAt, message), cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return new(BookingCancellationOutcome.Cancelled, booking);
+    }
+
+    private async Task ReleaseSeatsAsync(Guid bookingId, Guid performanceId, int seats, DateTimeOffset currentTime,
+        CancellationToken cancellationToken)
+    {
+        var releasedPerformanceRows =
+            await dbContext.Performances
+                .Where(performance =>
+                    performance.Id == performanceId
+                    && performance.AvailableSeats
+                    + seats
+                    <= performance.Capacity)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(
+                        performance =>
+                            performance.AvailableSeats,
+                        performance =>
+                            performance.AvailableSeats + seats)
+                    .SetProperty(
+                        performance => performance.UpdatedAt,
+                        currentTime), cancellationToken);
+
+        if (releasedPerformanceRows != 1)
+        {
+            throw new InvalidOperationException($"Could not release seats for booking {bookingId}");
+        }
     }
 
     private async Task<BookingEntity?> FindByIdempotencyKeyAsync(

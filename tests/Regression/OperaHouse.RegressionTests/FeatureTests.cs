@@ -107,6 +107,7 @@ internal static class FeatureTests
         {
             (typeof(BookingsController), "Create", "POST", "/bookings", false),
             (typeof(BookingsController), "GetById", "GET", "/bookings/{id:guid}", false),
+            (typeof(BookingsController), "Cancel", "POST", "/bookings/{id:guid}/cancel", false),
             (typeof(PerformancesController), "Browse", "GET", "/performances", false),
             (typeof(PerformancesController), "GetAll", "GET", "/admin/performances", true),
             (typeof(PerformancesController), "GetById", "GET", "/admin/performances/{id:guid}", true),

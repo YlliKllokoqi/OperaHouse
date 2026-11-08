@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using OperaHouse.Contracts.Events;
 using OperaHouse.Messaging;
 using OperaHouse.Notification.Email;
 using OperaHouse.Notification.Features;
@@ -19,20 +20,19 @@ internal static class WorkerTests
     {
         await CheckTopologyAsync();
 
-        foreach (var created in new[] { true, false })
+        foreach (var (route, eventName, json) in EventSamples())
         {
-            var eventName = created ? "BookingCreated" : "BookingExpired";
-            foreach (var json in new[] { "{}", "null", "{broken" })
+            foreach (var invalid in new[] { "{}", "null", "{broken" })
             {
                 using var fixture = new Session();
                 var session = fixture.Worker.RunAsync(fixture.Cancellation.Token);
-                await fixture.DeliverAsync(created, json);
+                await fixture.DeliverAsync(route, invalid);
                 var warnings = fixture.Logger.Entries.Where(x => x.Level >= LogLevel.Warning).ToArray();
                 Check.That(fixture.Channel.Nacks == 1 && !fixture.Channel.Requeue
                     && fixture.Channel.Acks == 0 && fixture.RetryChannel.Publishes == 0
                     && fixture.Sender.Sends == 0 && warnings.Length == 1
                     && warnings[0].Level == LogLevel.Warning && warnings[0].Exception is not null,
-                    $"{eventName}: malformed delivery {json} goes directly to dead-lettering");
+                    $"{eventName}: malformed delivery {invalid} goes directly to dead-lettering");
                 fixture.Cancellation.Cancel();
                 await Check.ThrowsAsync<OperationCanceledException>(() => session);
             }
@@ -42,9 +42,7 @@ internal static class WorkerTests
                 var cause = new InvalidOperationException("Mailbox rejected");
                 fixture.Sender.Failure = new PermanentEmailDeliveryException(cause);
                 var session = fixture.Worker.RunAsync(fixture.Cancellation.Token);
-                var json = created ? JsonSerializer.Serialize(NotificationTests.Created())
-                    : JsonSerializer.Serialize(NotificationTests.Expired());
-                await fixture.DeliverAsync(created, json);
+                await fixture.DeliverAsync(route, json);
                 using var payload = JsonDocument.Parse(json);
                 var errors = fixture.Logger.Entries.Where(x => x.Level >= LogLevel.Warning).ToArray();
                 Check.That(fixture.Sender.Sends == 1 && fixture.Channel.Nacks == 1 && !fixture.Channel.Requeue
@@ -63,9 +61,7 @@ internal static class WorkerTests
                 fixture.Sender.Failure = new IOException("Email server unavailable");
                 fixture.RetryChannel.PublishFailure = new IOException("Retry publication failed");
                 var session = fixture.Worker.RunAsync(fixture.Cancellation.Token);
-                var json = created ? JsonSerializer.Serialize(NotificationTests.Created())
-                    : JsonSerializer.Serialize(NotificationTests.Expired());
-                var error = await Check.ThrowsAsync<IOException>(() => fixture.DeliverAsync(created, json));
+                var error = await Check.ThrowsAsync<IOException>(() => fixture.DeliverAsync(route, json));
                 // RabbitMQ's dispatcher reports escaped delivery errors through this event.
                 await fixture.Channel.CallbackExceptionAsync!(fixture.Channel,
                     new CallbackExceptionEventArgs(new Dictionary<string, object>(), error));
@@ -80,14 +76,11 @@ internal static class WorkerTests
             {
                 fixture.Sender.Failure = new IOException("Email server unavailable");
                 var session = fixture.Worker.RunAsync(fixture.Cancellation.Token);
-                var json = created ? JsonSerializer.Serialize(NotificationTests.Created())
-                    : JsonSerializer.Serialize(NotificationTests.Expired());
-                await fixture.DeliverAsync(created, json);
+                await fixture.DeliverAsync(route, json);
                 var warnings = fixture.Logger.Entries.Where(x => x.Level >= LogLevel.Warning).ToArray();
                 var messageId = JsonDocument.Parse(json).RootElement.GetProperty("MessageId").GetGuid();
                 Check.That(fixture.Channel.Acks == 1 && fixture.RetryChannel.Publishes == 1
-                    && fixture.RetryChannel.LastRoutingKey == (created
-                        ? "booking.created.retry" : "booking.expired.retry")
+                    && fixture.RetryChannel.LastRoutingKey == $"{route}.retry"
                     && warnings.Length == 1 && warnings[0].Level == LogLevel.Warning
                     && warnings[0].Exception == fixture.Sender.Failure
                     && Equals(warnings[0].Context["MessageId"], messageId)
@@ -102,9 +95,7 @@ internal static class WorkerTests
             {
                 fixture.Sender.Failure = new IOException("Email server unavailable");
                 var session = fixture.Worker.RunAsync(fixture.Cancellation.Token);
-                var json = created ? JsonSerializer.Serialize(NotificationTests.Created())
-                    : JsonSerializer.Serialize(NotificationTests.Expired());
-                await fixture.DeliverAsync(created, json, retryCount: 3);
+                await fixture.DeliverAsync(route, json, retryCount: 3);
                 var failures = fixture.Logger.Entries.Where(x => x.Level >= LogLevel.Warning).ToArray();
                 Check.That(fixture.Channel.Nacks == 1 && !fixture.Channel.Requeue
                     && fixture.RetryChannel.Publishes == 0 && failures.Length == 1
@@ -117,10 +108,8 @@ internal static class WorkerTests
             using (var fixture = new Session())
             {
                 var session = fixture.Worker.RunAsync(fixture.Cancellation.Token);
-                var json = created ? JsonSerializer.Serialize(NotificationTests.Created())
-                    : JsonSerializer.Serialize(NotificationTests.Expired());
-                await fixture.DeliverAsync(created, json);
-                await fixture.DeliverAsync(created, json);
+                await fixture.DeliverAsync(route, json);
+                await fixture.DeliverAsync(route, json);
                 Check.That(fixture.Channel.Acks == 2 && fixture.Sender.Sends == 1
                     && fixture.Logger.Entries.Count == 3
                     && fixture.Logger.Entries.All(x => x.Level == LogLevel.Information),
@@ -138,6 +127,19 @@ internal static class WorkerTests
             await Check.ThrowsAsync<IOException>(() => session);
             Check.That(fixture.Channel.Disposed, "Closed retry channel ends the session for reconnection");
         }
+    }
+
+    private static (string Route, string Type, string Json)[] EventSamples()
+    {
+        var expired = NotificationTests.Expired();
+        var cancelled = new BookingCancelled(expired.MessageId, expired.CorrelationId, expired.BookingId,
+            expired.PerformanceId, expired.CustomerEmail, expired.Seats, expired.OccurredAt);
+        return
+        [
+            ("booking.created", nameof(BookingCreated), JsonSerializer.Serialize(NotificationTests.Created())),
+            ("booking.expired", nameof(BookingExpired), JsonSerializer.Serialize(expired)),
+            ("booking.cancelled", nameof(BookingCancelled), JsonSerializer.Serialize(cancelled))
+        ];
     }
 
     private static async Task CheckTopologyAsync()
@@ -160,7 +162,14 @@ internal static class WorkerTests
             BookingExpiredRetryRoutingKey = "expired.retry.key",
             BookingExpiredRetryDelayMilliseconds = 7003,
             BookingExpiredDeadLetterQueueName = "expired.dead",
-            BookingExpiredDeadLetterRoutingKey = "expired.dead.key"
+            BookingExpiredDeadLetterRoutingKey = "expired.dead.key",
+            BookingCancelledQueueName = "cancelled.main",
+            BookingCancelledRoutingKey = "cancelled.key",
+            BookingCancelledRetryQueueName = "cancelled.retry",
+            BookingCancelledRetryRoutingKey = "cancelled.retry.key",
+            BookingCancelledRetryDelayMilliseconds = 9007,
+            BookingCancelledDeadLetterQueueName = "cancelled.dead",
+            BookingCancelledDeadLetterRoutingKey = "cancelled.dead.key"
         };
         using var fixture = new Session(options);
         var session = fixture.Worker.RunAsync(fixture.Cancellation.Token);
@@ -170,11 +179,11 @@ internal static class WorkerTests
             && fixture.Channel.Exchanges.Keys.Order().SequenceEqual(new[] { "test.dead", "test.events", "test.retry" })
             && fixture.Channel.Exchanges.Values.All(x => x == ("topic", true, false)),
             "Notification exchanges retain their configured names, topic type, and durability");
-        Check.That(fixture.Channel.Queues.Count == 6 && fixture.Channel.Bindings.Count == 6
+        Check.That(fixture.Channel.Queues.Count == 9 && fixture.Channel.Bindings.Count == 9
             && fixture.Channel.Queues.Values.All(x => x.Durable && !x.Exclusive && !x.AutoDelete),
-            "All six notification queues remain durable, shared, and non-auto-deleting");
+            "All nine notification queues remain durable, shared, and non-auto-deleting");
 
-        foreach (var (kind, delay) in new[] { ("created", 5001), ("expired", 7003) })
+        foreach (var (kind, delay) in new[] { ("created", 5001), ("expired", 7003), ("cancelled", 9007) })
         {
             var main = fixture.Channel.Queues[$"{kind}.main"].Arguments;
             var retry = fixture.Channel.Queues[$"{kind}.retry"].Arguments;
@@ -225,17 +234,20 @@ internal static class WorkerTests
             _services = new ServiceCollection()
                 .AddScoped(_ => new SendBookingConfirmation(store.Processor(Sender)))
                 .AddScoped(_ => new SendBookingExpiration(store.Processor(Sender)))
+                .AddScoped(_ => new SendBookingCancellation(store.Processor(Sender)))
                 .BuildServiceProvider();
             Worker = new TestWorker(_services.GetRequiredService<IServiceScopeFactory>(), factory, Logger,
                 options ?? new RabbitMqOptions());
         }
 
-        public async Task DeliverAsync(bool created, string json, int retryCount = 0)
+        public async Task DeliverAsync(string route, string json, int retryCount = 0)
         {
             await Channel.Ready.Task.WaitAsync(Cancellation.Token);
-            var consumer = Channel.Consumers[created ? 0 : 1];
+            var binding = Channel.Bindings.Single(binding =>
+                binding.Exchange == "operahouse.events" && binding.RoutingKey == route);
+            var consumer = Channel.Consumers[binding.Queue];
             await consumer.HandleBasicDeliverAsync("test", 1, false, "operahouse.events",
-                created ? "booking.created" : "booking.expired", new BasicProperties
+                route, new BasicProperties
                 { Headers = new Dictionary<string, object?> { ["x-retry-count"] = retryCount } },
                 Encoding.UTF8.GetBytes(json), Cancellation.Token);
         }
@@ -281,7 +293,7 @@ internal sealed class RecordingLogger<T> : ILogger<T>
 
 public class ChannelStub : DispatchProxy
 {
-    public List<AsyncEventingBasicConsumer> Consumers { get; } = [];
+    public Dictionary<string, AsyncEventingBasicConsumer> Consumers { get; } = [];
     public TaskCompletionSource Ready { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public AsyncEventHandler<CallbackExceptionEventArgs>? CallbackExceptionAsync;
     public AsyncEventHandler<ShutdownEventArgs>? ChannelShutdownAsync;
@@ -301,8 +313,8 @@ public class ChannelStub : DispatchProxy
             case "add_CallbackExceptionAsync": CallbackExceptionAsync += (AsyncEventHandler<CallbackExceptionEventArgs>)args![0]!; return null;
             case "add_ChannelShutdownAsync": ChannelShutdownAsync += (AsyncEventHandler<ShutdownEventArgs>)args![0]!; return null;
             case "BasicConsumeAsync":
-                Consumers.Add(args!.OfType<AsyncEventingBasicConsumer>().Single());
-                if (Consumers.Count == 2) Ready.TrySetResult();
+                Consumers.Add((string)args![0]!, args.OfType<AsyncEventingBasicConsumer>().Single());
+                if (Consumers.Count == 3) Ready.TrySetResult();
                 return Task.FromResult("test");
             case "BasicPublishAsync":
                 Publishes++; LastRoutingKey = (string)args![1]!;

@@ -42,6 +42,20 @@ internal sealed class NotificationDeliveryHandler(
                 return await services.GetRequiredService<SendBookingExpiration>().HandleAsync(message, token);
             }, token);
 
+    public Task HandleBookingCancelledAsync(IChannel channel, IChannel retryChannel,
+        BasicDeliverEventArgs delivery, CancellationToken token) =>
+        HandleAsync(channel, retryChannel, delivery, nameof(BookingCancelled),
+            options.BookingCancelledRetryRoutingKey, options.BookingCancelledMaxRetryAttempts,
+            async (services, context) =>
+            {
+                var message = JsonSerializer.Deserialize<BookingCancelled>(delivery.Body.Span)
+                    ?? throw new JsonException("BookingCancelled message could not be deserialized.");
+                context["MessageId"] = message.MessageId;
+                context["CorrelationId"] = message.CorrelationId;
+                context["BookingId"] = message.BookingId;
+                return await services.GetRequiredService<SendBookingCancellation>().HandleAsync(message, token);
+            }, token);
+
     private async Task HandleAsync(IChannel channel, IChannel retryChannel, BasicDeliverEventArgs delivery,
         string messageType, string retryRoutingKey, int maxAttempts,
         Func<IServiceProvider, Dictionary<string, object?>, Task<NotificationProcessingResult>> process,

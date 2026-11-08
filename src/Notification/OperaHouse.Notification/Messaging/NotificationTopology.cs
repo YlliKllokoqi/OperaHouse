@@ -22,6 +22,10 @@ internal static class NotificationTopology
             options.BookingExpiredRoutingKey, options.BookingExpiredRetryQueueName,
             options.BookingExpiredRetryRoutingKey, options.BookingExpiredRetryDelayMilliseconds,
             options.BookingExpiredDeadLetterQueueName, options.BookingExpiredDeadLetterRoutingKey, token);
+        await DeclareQueuesAsync(channel, options, options.BookingCancelledQueueName,
+            options.BookingCancelledRoutingKey, options.BookingCancelledRetryQueueName,
+            options.BookingCancelledRetryRoutingKey, options.BookingCancelledRetryDelayMilliseconds,
+            options.BookingCancelledDeadLetterQueueName, options.BookingCancelledDeadLetterRoutingKey, token);
     }
 
     private static async Task DeclareQueuesAsync(IChannel channel, RabbitMqOptions options,

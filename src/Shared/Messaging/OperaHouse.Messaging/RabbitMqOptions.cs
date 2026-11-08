@@ -31,4 +31,13 @@ public class RabbitMqOptions
     public string BookingExpiredDeadLetterQueueName { get; init; } = "notification-booking-expired.dead-letter.queue";
 
     public string BookingExpiredDeadLetterRoutingKey { get; init; } = "booking.expired.dead";
+
+    public string BookingCancelledRoutingKey { get; init; } = "booking.cancelled";
+    public string BookingCancelledQueueName { get; init; } = "notification-booking-cancelled.queue";
+    public string BookingCancelledRetryQueueName { get; init; } = "notification-booking-cancelled.retry.queue";
+    public string BookingCancelledRetryRoutingKey { get; init; } = "booking.cancelled.retry";
+    public int BookingCancelledRetryDelayMilliseconds { get; init; } = 10_000;
+    public int BookingCancelledMaxRetryAttempts { get; init; } = 3;
+    public string BookingCancelledDeadLetterQueueName { get; init; } = "notification-booking-cancelled.dead-letter.queue";
+    public string BookingCancelledDeadLetterRoutingKey { get; init; } = "booking.cancelled.dead";
 }

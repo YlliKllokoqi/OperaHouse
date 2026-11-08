@@ -59,12 +59,14 @@ SMTP acceptance and database persistence are not atomic. A successful submission
 
 ## 2. Add unpaid booking cancellation
 
-Use `POST /bookings/{id:guid}/cancel` for the local API. Return the current booking with `200` after a successful cancellation or an already-cancelled repeat; return `404` for a missing booking and `409` for an ineligible state. A pending reservation whose deadline has passed is no longer eligible for cancellation; the expiration worker owns that transition. Use server-loaded reservation details, never client-supplied email or seat counts.
+**Implemented.** All 48 notification checks and six cancellation checks against a disposable PostgreSQL database passed. See the [focused test commands](../tests/README.md). Live RabbitMQ and SMTP verification remains in step 5.
+
+Use `POST /bookings/{id:guid}/cancel` from the local machine in Development. The API returns `200` with the current booking after a successful cancellation or an already-cancelled repeat, `400` for an empty ID, `404` for a missing booking, and `409` for an ineligible state. The expiration worker owns pending reservations at or past their deadline. The booking supplies the seat count and email address.
 
 | Files | Implementation |
 | --- | --- |
-| `src/Booking/OperaHouse.Booking/Features/CancelBooking/Handler.cs`, `Request.cs`, `Validator.cs` (new) | Follow Create/GetBooking conventions. Validate the ID, use `TimeProvider`, and map the repository result to the existing application-result/error types. |
-| `src/Booking/OperaHouse.Booking/Persistence/IBookingRepository.cs` and `src/Shared/Persistence/OperaHouse.Persistence/Bookings/BookingRepository.cs` | Add a conditional cancellation operation using the same transaction approach as `TryExpireAsync`. Return enough information to distinguish success, repeated cancellation, missing booking, and conflict. Update test repository substitutes for the added member. |
+| `src/Booking/OperaHouse.Booking/Features/CancelBooking/Handler.cs` | Validate the route ID, use `TimeProvider`, and map the repository result to the existing application-result/error types. |
+| `src/Booking/OperaHouse.Booking/Persistence/IBookingRepository.cs` and `src/Shared/Persistence/OperaHouse.Persistence/Bookings/BookingRepository.cs` | Use a conditional cancellation update and share the seat release operation with expiration. Return the cancelled booking, a missing result, or an ineligible result. |
 | `src/Shared/Contracts/OperaHouse.Contracts/Events/BookingCancelled.cs` (new) | Carry stable message/correlation IDs, booking/performance IDs, email, seat count, and occurrence time, following `BookingExpired`. |
 | `src/Notification/OperaHouse.Notification/Features/SendBookingCancellation/Handler.cs` (new), `Processing/BookingEventValidator.cs`, `Messaging/NotificationTopology.cs`, `NotificationDeliveryHandler.cs`, and `Worker.cs` | Add cancellation content, validation, a consumer, and its main/retry/dead-letter routes. Reuse `NotificationProcessor` for inbox/send/outcome persistence. |
 | `src/Shared/Messaging/OperaHouse.Messaging/RabbitMqOptions.cs`, `src/Api/OperaHouse.Api/Program.cs`, `Controllers/BookingsController.cs`, and relevant tests/configuration/docs | Add cancellation route settings and registrations, the local action, route/validation checks, topology expectations, and the runbook entry. Keep explicit configuration consistent with option defaults. |
@@ -72,9 +74,8 @@ Use `POST /bookings/{id:guid}/cancel` for the local API. Return the current book
 The transaction is small and explicit:
 
 ```text
-Load authoritative booking details.
 Conditionally update Pending + ExpiresAt > now to Cancelled, setting CancelledAt.
-If no row changed, reload state and return repeat/missing/conflict without releasing seats.
+Read the current booking. If no row changed, return repeat/missing/conflict.
 If the transition won, release the stored number of seats with a capacity guard.
 Insert one BookingCancelled outbox record and commit all three changes together.
 ```

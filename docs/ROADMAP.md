@@ -17,7 +17,7 @@ Last reviewed: **2 November 2026**. Status distinguishes source implementation f
 | 1. Booking and basic messaging | Create a booking and tell the notification worker about it. | Foundation implemented. |
 | 2. Reliable messaging and email | Persist messages, retry failures, recognize completed processing, and send email. | Most foundation code exists; verification and reliability gaps remain. |
 | 3. Performance administration | Let authorized administrators manage performances. | Main use cases implemented; lifecycle and database verification remain. |
-| 4. Complete reservations and expiration | Reserve seats safely, release them correctly, and notify the customer. | **Current chapter.** Created/expired consumers and email failure classification are implemented. Unpaid cancellation, controlled replay, and infrastructure verification remain. |
+| 4. Complete reservations and expiration | Reserve seats safely, release them correctly, and notify the customer. | **Current chapter.** Reservation expiration, unpaid cancellation, and email failure classification are implemented. Controlled replay and infrastructure verification remain. |
 | 5. First Azure deployment | Run the reservation flow in a small Azure environment using Terraform, Postmark, and Microsoft Entra ID. | Planned, before payments; includes the authentication and authorization milestone. |
 | 6. Payments | Confirm a reservation after a verified payment. | Planned; deploy with the feature. |
 | 7. Tickets and document storage | Issue downloadable tickets for confirmed bookings. | Planned; add Blob Storage here. |
@@ -26,7 +26,7 @@ Last reviewed: **2 November 2026**. Status distinguishes source implementation f
 | 10. Customer access and notification experience | Add customer accounts and improve the complete communication journey. | Planned; guest access is secured earlier. |
 | 11. Production readiness | Prove recovery, scaling, security, and operational procedures. | Planned; builds on checks introduced throughout. |
 
-Add unpaid cancellation next, followed by controlled DLQ replay and PostgreSQL/RabbitMQ verification. Complete Chapter 4 before starting the first Azure deployment.
+Add controlled DLQ replay next, followed by PostgreSQL/RabbitMQ verification. Complete Chapter 4 before starting the first Azure deployment.
 
 ## How to use this roadmap
 
@@ -191,10 +191,10 @@ This is the current chapter. Reservation state definitions exist, but confirmed 
 
 ### 4.3 Complete unpaid cancellation
 
-- [ ] Implement cancellation of a pending unpaid reservation and transactional seat release.
-- [ ] Make repeated cancellation and cancellation racing expiration safe; release seats only for the winning state transition.
-- [ ] Add the cancellation event/notification path with its topology and consumer before enabling publication.
-- [ ] Define the access contract for this operation; Chapter 5 must enforce ownership or secure guest access before public exposure.
+- [x] Implement cancellation of a pending unpaid reservation and transactional seat release.
+- [x] Release seats only for the winning state transition when requests repeat or race expiration.
+- [x] Add the cancellation event, notification handler, and RabbitMQ routes.
+- [x] Restrict the Chapter 4 endpoint to loopback requests in Development. Chapter 5 must enforce booking ownership before public exposure.
 
 ### 4.4 Local verification and meaningful tests
 
