@@ -4,6 +4,13 @@ using OperaHouse.RegressionTests;
 
 await NotificationTests.RunAsync();
 await WorkerTests.RunAsync();
+
+if (args is ["--notifications"])
+{
+    Console.WriteLine($"All {Check.Passed} notification regression checks passed.");
+    return;
+}
+
 ModelCompatibilityTests.Run();
 await FeatureTests.RunAsync();
 

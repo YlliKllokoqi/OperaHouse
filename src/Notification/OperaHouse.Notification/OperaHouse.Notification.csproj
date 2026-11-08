@@ -6,6 +6,7 @@
     <UserSecretsId>dotnet-OperaHouse.Notification.Worker-bd4dd695-0171-4d19-b417-e81d9e1077c2</UserSecretsId>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="OperaHouse.RegressionTests" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
   </ItemGroup>

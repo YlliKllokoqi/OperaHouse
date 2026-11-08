@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using OperaHouse.Contracts.Events;
 using OperaHouse.Messaging;
+using OperaHouse.Notification.Email;
 using OperaHouse.Notification.Features;
 using OperaHouse.Notification.Processing;
 using RabbitMQ.Client;
@@ -73,6 +74,13 @@ internal sealed class NotificationDeliveryHandler(
             logger.LogWarning(exception, "Invalid {MessageType} message rejected to the dead-letter queue.", messageType);
             await channel.BasicNackAsync(delivery.DeliveryTag, multiple: false, requeue: false,
                 cancellationToken: token);
+        }
+        catch (PermanentEmailDeliveryException exception)
+        {
+            await channel.BasicNackAsync(delivery.DeliveryTag, multiple: false, requeue: false,
+                cancellationToken: token);
+            logger.LogError(exception,
+                "Rejected {MessageType} notification after a permanent email failure.", messageType);
         }
         catch (Exception exception)
         {

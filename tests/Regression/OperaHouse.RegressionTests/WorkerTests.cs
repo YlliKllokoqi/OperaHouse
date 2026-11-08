@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OperaHouse.Messaging;
+using OperaHouse.Notification.Email;
 using OperaHouse.Notification.Features;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -32,6 +33,27 @@ internal static class WorkerTests
                     && fixture.Sender.Sends == 0 && warnings.Length == 1
                     && warnings[0].Level == LogLevel.Warning && warnings[0].Exception is not null,
                     $"{eventName}: malformed delivery {json} goes directly to dead-lettering");
+                fixture.Cancellation.Cancel();
+                await Check.ThrowsAsync<OperationCanceledException>(() => session);
+            }
+
+            using (var fixture = new Session())
+            {
+                var cause = new InvalidOperationException("Mailbox rejected");
+                fixture.Sender.Failure = new PermanentEmailDeliveryException(cause);
+                var session = fixture.Worker.RunAsync(fixture.Cancellation.Token);
+                var json = created ? JsonSerializer.Serialize(NotificationTests.Created())
+                    : JsonSerializer.Serialize(NotificationTests.Expired());
+                await fixture.DeliverAsync(created, json);
+                using var payload = JsonDocument.Parse(json);
+                var errors = fixture.Logger.Entries.Where(x => x.Level >= LogLevel.Warning).ToArray();
+                Check.That(fixture.Sender.Sends == 1 && fixture.Channel.Nacks == 1 && !fixture.Channel.Requeue
+                    && fixture.Channel.Acks == 0 && fixture.RetryChannel.Publishes == 0
+                    && errors.Length == 1 && errors[0].Level == LogLevel.Error
+                    && errors[0].Exception?.InnerException == cause
+                    && Equals(errors[0].Context["MessageId"], payload.RootElement.GetProperty("MessageId").GetGuid())
+                    && Equals(errors[0].Context["CorrelationId"], payload.RootElement.GetProperty("CorrelationId").GetGuid()),
+                    $"{eventName}: permanent email rejection goes directly to dead-lettering with its cause and IDs");
                 fixture.Cancellation.Cancel();
                 await Check.ThrowsAsync<OperationCanceledException>(() => session);
             }

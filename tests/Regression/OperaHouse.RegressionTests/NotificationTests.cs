@@ -1,4 +1,7 @@
 using System.ComponentModel.DataAnnotations;
+using MailKit;
+using MailKit.Net.Smtp;
+using MailKit.Security;
 using OperaHouse.Contracts.Events;
 using OperaHouse.Notification.Email;
 using OperaHouse.Notification.Features;
@@ -24,6 +27,8 @@ internal static class NotificationTests
 
     public static async Task RunAsync()
     {
+        CheckSmtpFailureClassification();
+
         foreach (var created in new[] { true, false })
         {
             var eventName = created ? nameof(BookingCreated) : nameof(BookingExpired);
@@ -41,6 +46,15 @@ internal static class NotificationTests
                 && store.Notifications.Single().FailureReason is null
                 && store.Inbox.Single().Status == InboxMessageStatus.Processed,
                 $"{eventName}: save failure does not relabel accepted email or attempt a failure save");
+
+            var saveFailure = new IOException("Database unavailable");
+            var sendFailure = new PermanentEmailDeliveryException(new InvalidOperationException("Mailbox rejected"));
+            store = new MemoryStore { SaveException = saveFailure };
+            sender = new EmailSender { Failure = sendFailure };
+            service = store.Processor(sender);
+            var combinedFailure = await Check.ThrowsAsync<AggregateException>(Process);
+            Check.That(store.Saves == 1 && combinedFailure.InnerExceptions.SequenceEqual([sendFailure, saveFailure]),
+                $"{eventName}: failure recording a rejection preserves both causes for retry");
 
             store = new MemoryStore();
             sender = new EmailSender { Failure = new IOException("SMTP unavailable") };
@@ -91,6 +105,31 @@ internal static class NotificationTests
             Check.That(store.Saves == 0 && store.Notifications.Single().Status == NotificationStatus.Pending,
                 $"{eventName}: shutdown does not record an email failure");
         }
+    }
+
+    private static void CheckSmtpFailureClassification()
+    {
+        (int Code, bool Authentication, bool Permanent)[] cases =
+        [
+            (451, false, false),
+            (454, true, false),
+            (535, true, true),
+            (550, false, true)
+        ];
+
+        foreach (var (code, authentication, permanent) in cases)
+        {
+            var reply = new SmtpCommandException(SmtpErrorCode.UnexpectedStatusCode,
+                (SmtpStatusCode)code, "Test SMTP reply");
+            Exception failure = authentication ? new AuthenticationException("Authentication failed", reply) : reply;
+            Check.That(SmtpEmailSender.IsPermanentRejection(failure) == permanent,
+                $"SMTP {code}: {(permanent ? "permanent rejection" : "temporary failure")}");
+        }
+
+        Check.That(SmtpEmailSender.IsPermanentRejection(new ServiceNotAuthenticatedException()),
+            "SMTP authentication required is a permanent rejection");
+        Check.That(!SmtpEmailSender.IsPermanentRejection(new IOException("SMTP unavailable")),
+            "SMTP connection failure remains retryable");
     }
 }
 

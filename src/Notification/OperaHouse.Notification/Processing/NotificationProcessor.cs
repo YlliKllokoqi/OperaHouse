@@ -75,7 +75,16 @@ public sealed class NotificationProcessor(INotificationStore store, IEmailSender
             inboxMessage.ProcessedAt = null;
             inboxMessage.LastError = exception.Message;
 
-            await store.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await store.SaveChangesAsync(cancellationToken);
+            }
+            catch (Exception saveException) when (
+                saveException is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                throw new AggregateException("Could not record the email failure.", exception, saveException);
+            }
+
             throw;
         }
 

@@ -6,6 +6,12 @@ Run from the repository root:
 dotnet run --project tests/Regression/OperaHouse.RegressionTests
 ```
 
+Run the notification and worker checks independently.
+
+```sh
+dotnet run --project tests/Regression/OperaHouse.RegressionTests -- --notifications
+```
+
 This small assertion-based runner uses the application's existing dependencies.
 It checks malformed events, notification status after email or database failures,
 duplicate processing, worker session recovery, exact queue topology/retry routing, and UTC normalization.

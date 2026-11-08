@@ -8,7 +8,7 @@ The intended customer journey is:
 
 We will build and deploy this journey a chapter at a time. The first Azure deployment happens after reservations and expiration work locally. Later features bring their infrastructure, tests, security, and diagnostics with them. The final chapter prepares an already deployed system for production operation.
 
-Last reviewed: **1 November 2026**. Status distinguishes source implementation from infrastructure verification. The vertical-slice consolidation retains the existing database schema and migration history; local database/broker execution and cloud deployment still require separate verification.
+Last reviewed: **2 November 2026**. Status distinguishes source implementation from infrastructure verification. The vertical-slice consolidation retains the existing database schema and migration history; local database/broker execution and cloud deployment still require separate verification.
 
 ## Start here
 
@@ -17,8 +17,8 @@ Last reviewed: **1 November 2026**. Status distinguishes source implementation f
 | 1. Booking and basic messaging | Create a booking and tell the notification worker about it. | Foundation implemented. |
 | 2. Reliable messaging and email | Persist messages, retry failures, recognize completed processing, and send email. | Most foundation code exists; verification and reliability gaps remain. |
 | 3. Performance administration | Let authorized administrators manage performances. | Main use cases implemented; lifecycle and database verification remain. |
-| 4. Complete reservations and expiration | Reserve seats safely, release them correctly, and notify the customer. | **Current chapter.** Created/expired consumers are implemented; failure classification, unpaid cancellation, and infrastructure verification remain. |
-| 5. First Azure deployment | Run the reservation flow in a small Azure environment using Terraform and Postmark. | Planned, before payments. |
+| 4. Complete reservations and expiration | Reserve seats safely, release them correctly, and notify the customer. | **Current chapter.** Created/expired consumers and email failure classification are implemented. Unpaid cancellation, controlled replay, and infrastructure verification remain. |
+| 5. First Azure deployment | Run the reservation flow in a small Azure environment using Terraform, Postmark, and Microsoft Entra ID. | Planned, before payments; includes the authentication and authorization milestone. |
 | 6. Payments | Confirm a reservation after a verified payment. | Planned; deploy with the feature. |
 | 7. Tickets and document storage | Issue downloadable tickets for confirmed bookings. | Planned; add Blob Storage here. |
 | 8. Invoices | Produce an invoice from the completed purchase. | Planned; extend existing storage and processing. |
@@ -26,7 +26,7 @@ Last reviewed: **1 November 2026**. Status distinguishes source implementation f
 | 10. Customer access and notification experience | Add customer accounts and improve the complete communication journey. | Planned; guest access is secured earlier. |
 | 11. Production readiness | Prove recovery, scaling, security, and operational procedures. | Planned; builds on checks introduced throughout. |
 
-**Next small task:** classify permanent versus transient email failures, then finish unpaid cancellation and the PostgreSQL/RabbitMQ verification work. Complete Chapter 4 before starting the first Azure deployment.
+Add unpaid cancellation next, followed by controlled DLQ replay and PostgreSQL/RabbitMQ verification. Complete Chapter 4 before starting the first Azure deployment.
 
 ## How to use this roadmap
 
@@ -150,7 +150,7 @@ Keycloak remains an alternative if operating an identity platform becomes an exp
 - [x] Show customers only published future performances.
 - [x] Prevent reservations for unavailable performance states or past performances.
 - [x] Add admin create, update, publish, cancel, and list operations.
-- [x] Keep management actions on the API's Performances controller, require the Admin policy, and call the Performance slice handlers.
+- [~] Keep management actions on the API's Performances controller and call the Performance slice handlers. Admin-policy enforcement is currently disabled; authentication and authorization are assigned to Chapter 5's identity milestone.
 - [x] Add JWT bearer authentication, development tokens, and an administrator policy.
 - [x] Keep public browsing and guest booking available without customer registration.
 - [~] Verify the administration migration and complete lifecycle against a running database.
@@ -183,7 +183,7 @@ This is the current chapter. Reservation state definitions exist, but confirmed 
 - [x] Implement the expiration notification slice using shared inbox/outcome processing and `IEmailSender`.
 - [x] Consume expiration events through the expiration notification slice.
 - [x] Use manual ACK/NACK, contextual outcome logging, and expiration-specific retry routing.
-- [~] Reject malformed JSON and invalid event fields directly to the DLQ. Classify permanent versus transient email/provider failures for both event types.
+- [x] Route invalid events and permanent SMTP rejections directly to the DLQ for both event types. Retry temporary failures.
 - [x] Confirm retry publication before ACKing the original delivery; surface callback/channel failures to the session reconnect loop.
 - [ ] Verify failed retry publication and original-message recovery against a running broker.
 - [ ] Add a documented, controlled way to inspect and replay DLQ messages while preserving message identity.
@@ -209,7 +209,7 @@ This is the current chapter. Reservation state definitions exist, but confirmed 
 - [ ] Demonstrate a real booking email and expiration email to a controlled test recipient.
 - [x] Document the email send-before-database-save failure window: inbox tracking alone cannot guarantee exactly-once email delivery.
 
-SMTP tests are excluded from the current architecture refactor at the user's request. The controlled-recipient demonstration above remains a separate future acceptance check.
+SMTP tests were excluded from the architecture refactor at the user's request. The controlled-recipient demonstration above remains a separate Chapter 4 acceptance check.
 
 **Chapter complete when:** the local booking → reservation → expiration/cancellation → seat release → notification flow is demonstrated, and the important concurrency and messaging failure cases have repeatable checks.
 
@@ -256,6 +256,12 @@ Work through these sections in small steps. This chapter establishes the deploym
 - [ ] Test accepted, delivered, failed, and repeated-callback cases, and demonstrate delivery to a controlled real recipient.
 
 ### 5.4 Secure the first deployed API
+
+**Milestone — Authentication and authorization through Microsoft Entra ID.** Complete this before public deployment. Chapter 4 continues with local reservation and messaging work; it does not implement identity integration or restore the currently commented admin attributes. The existing authorization regression failure remains a recorded deferral, not a passing check.
+
+Use a workforce tenant for staff sign-in. Configure the API's Entra issuer/audience validation, define and assign the `Admin` application role, and enforce that role on all administration actions. Entra supplies identity and role claims; the API remains responsible for checking permissions and booking ownership. Customer registration through Entra External ID stays in Chapter 10.
+
+**Milestone acceptance:** an anonymous admin request returns `401`; an authenticated caller without the `Admin` role returns `403`; an assigned administrator can manage performances. Tokens for the wrong issuer/audience or with an expired lifetime are rejected. Restore the deferred authorization regression checks and add token-validation coverage. Guest booking reads and cancellation must enforce scoped access/ownership before those routes are exposed publicly.
 
 - [ ] Replace reliance on local development JWTs with Entra workforce authentication for deployed admin endpoints and an explicit application-role policy.
 - [ ] Protect guest booking reads and cancellation with scoped, time-limited access credentials or equivalent ownership checks. A booking ID alone is not authorization.

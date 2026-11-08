@@ -96,7 +96,7 @@ x-last-failed-at
 x-last-error
 ```
 
-Invalid JSON or missing/invalid required event fields is rejected directly to the event's DLQ. Other processing failures currently use delayed retry up to the configured maximum. Broader permanent email/provider failure classification remains Chapter 4 work.
+Invalid JSON, invalid required event fields, and permanent SMTP rejections go directly to the event's DLQ. Temporary SMTP failures and other retryable processing failures use delayed retry up to the configured maximum.
 
 ## Booking outbox
 
